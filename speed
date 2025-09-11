@@ -1,0 +1,133 @@
+-- 速度控制相关变量
+local originalWalkSpeed = 16
+local SpeedEnabled = false
+local isSpeedAnimating = false
+local speedConnection = nil
+
+-- 速度控制UI元素
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Name = "SpeedLabel"
+SpeedLabel.Parent = BasicFrame
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Position = UDim2.new(0, 20, 0, 90)
+SpeedLabel.Size = UDim2.new(0, 200, 0, 30)
+SpeedLabel.Text = "速度控制"
+SpeedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedLabel.TextSize = 18
+SpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+SpeedLabel.Font = Enum.Font.SourceSansBold
+
+local SpeedTextBox = Instance.new("TextBox")
+SpeedTextBox.Name = "SpeedTextBox"
+SpeedTextBox.Parent = BasicFrame
+SpeedTextBox.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+SpeedTextBox.BackgroundTransparency = 0.5
+SpeedTextBox.BorderSizePixel = 0
+SpeedTextBox.Position = UDim2.new(0, 270, 0, 90)
+SpeedTextBox.Size = UDim2.new(0, 60, 0, 30)
+SpeedTextBox.Text = "16"
+SpeedTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedTextBox.TextSize = 16
+SpeedTextBox.TextXAlignment = Enum.TextXAlignment.Center
+SpeedTextBox.PlaceholderColor3 = Color3.fromRGB(200, 200, 200)
+SpeedTextBox.PlaceholderText = "速度"
+
+local SpeedTextBoxCorner = Instance.new("UICorner")
+SpeedTextBoxCorner.Parent = SpeedTextBox
+SpeedTextBoxCorner.CornerRadius = UDim.new(0, 8)
+
+local SpeedToggleBackground = Instance.new("TextButton")
+SpeedToggleBackground.Name = "SpeedToggleBackground"
+SpeedToggleBackground.Parent = BasicFrame
+SpeedToggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+SpeedToggleBackground.BorderSizePixel = 0
+SpeedToggleBackground.Position = UDim2.new(0, 350, 0, 90)
+SpeedToggleBackground.Size = UDim2.new(0, 60, 0, 30)
+SpeedToggleBackground.Text = ""
+SpeedToggleBackground.Active = true
+
+local SpeedToggleBackgroundCorner = Instance.new("UICorner")
+SpeedToggleBackgroundCorner.Parent = SpeedToggleBackground
+SpeedToggleBackgroundCorner.CornerRadius = UDim.new(0, 15)
+
+local SpeedToggleSlider = Instance.new("Frame")
+SpeedToggleSlider.Name = "SpeedToggleSlider"
+SpeedToggleSlider.Parent = SpeedToggleBackground
+SpeedToggleSlider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+SpeedToggleSlider.BorderSizePixel = 0
+SpeedToggleSlider.Size = UDim2.new(0, 30, 0, 30)
+SpeedToggleSlider.Position = UDim2.new(0, 0, 0, 0)
+
+local SpeedToggleSliderCorner = Instance.new("UICorner")
+SpeedToggleSliderCorner.Parent = SpeedToggleSlider
+SpeedToggleSliderCorner.CornerRadius = UDim.new(0, 15)
+
+-- 速度控制功能
+SpeedToggleBackground.MouseButton1Click:Connect(function()
+    if isSpeedAnimating then return end
+    
+    SpeedEnabled = not SpeedEnabled
+    isSpeedAnimating = true
+    
+    local targetPosition
+    if SpeedEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        SpeedToggleBackground.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            local value = tonumber(SpeedTextBox.Text)
+            if value then
+                character:FindFirstChildOfClass("Humanoid").WalkSpeed = value
+            end
+        end
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        SpeedToggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            character:FindFirstChildOfClass("Humanoid").WalkSpeed = originalWalkSpeed
+        end
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(SpeedToggleSlider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isSpeedAnimating = false
+    end)
+end)
+
+-- 实时更新速度
+if speedConnection then
+    speedConnection:Disconnect()
+end
+
+speedConnection = game:GetService("RunService").RenderStepped:Connect(function()
+    if SpeedEnabled and character and character:FindFirstChildOfClass("Humanoid") then
+        local value = tonumber(SpeedTextBox.Text)
+        if value then
+            character:FindFirstChildOfClass("Humanoid").WalkSpeed = value
+        end
+    end
+end)
+
+-- 初始化角色速度
+local function initializeCharacter()
+    character = player.Character or player.CharacterAdded:Wait()
+    
+    if character and character:FindFirstChildOfClass("Humanoid") then
+        originalWalkSpeed = character:FindFirstChildOfClass("Humanoid").WalkSpeed
+    end
+    
+    if SpeedEnabled and character and character:FindFirstChildOfClass("Humanoid") then
+        local value = tonumber(SpeedTextBox.Text)
+        if value then
+            character:FindFirstChildOfClass("Humanoid").WalkSpeed = value
+        end
+    end
+end
+
+player.CharacterAdded:Connect(function(newCharacter)
+    initializeCharacter()
+end)

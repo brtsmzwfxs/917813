@@ -1,10 +1,8 @@
--- 速度控制相关变量
 local originalWalkSpeed = 16
 local SpeedEnabled = false
 local isSpeedAnimating = false
 local speedConnection = nil
 
--- 速度控制UI元素
 local SpeedLabel = Instance.new("TextLabel")
 SpeedLabel.Name = "SpeedLabel"
 SpeedLabel.Parent = BasicFrame
@@ -62,7 +60,6 @@ local SpeedToggleSliderCorner = Instance.new("UICorner")
 SpeedToggleSliderCorner.Parent = SpeedToggleSlider
 SpeedToggleSliderCorner.CornerRadius = UDim.new(0, 15)
 
--- 速度控制功能
 SpeedToggleBackground.MouseButton1Click:Connect(function()
     if isSpeedAnimating then return end
     
@@ -98,7 +95,6 @@ SpeedToggleBackground.MouseButton1Click:Connect(function()
     end)
 end)
 
--- 实时更新速度
 if speedConnection then
     speedConnection:Disconnect()
 end
@@ -112,7 +108,6 @@ speedConnection = game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
--- 初始化角色速度
 local function initializeCharacter()
     character = player.Character or player.CharacterAdded:Wait()
     

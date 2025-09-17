@@ -1,0 +1,116 @@
+local ScreenGui = Instance.new("ScreenGui")
+local Frame = Instance.new("Frame")
+local JumpLabel = Instance.new("TextLabel")
+local JumpToggleBackground = Instance.new("TextButton")
+local JumpToggleSlider = Instance.new("Frame")
+
+ScreenGui.Parent = game.CoreGui
+ScreenGui.Name = "JumpGUI"
+
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+end)
+
+local screenSize = workspace.CurrentCamera.ViewportSize
+local centerX = (screenSize.X - 200) / 2
+local centerY = (screenSize.Y - 100) / 2
+
+Frame.Name = "Frame"
+Frame.Parent = ScreenGui
+Frame.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+Frame.BackgroundTransparency = 0.4
+Frame.Position = UDim2.new(0, centerX, 0, centerY)
+Frame.Size = UDim2.new(0, 200, 0, 60)
+Frame.Active = true
+Frame.Draggable = true
+
+local FrameCorner = Instance.new("UICorner")
+FrameCorner.Parent = Frame
+FrameCorner.CornerRadius = UDim.new(0, 12)
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Parent = Frame
+UIStroke.Color = Color3.fromRGB(255, 0, 0)
+UIStroke.Thickness = 3
+UIStroke.Transparency = 0.3
+UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+JumpLabel.Name = "JumpLabel"
+JumpLabel.Parent = Frame
+JumpLabel.BackgroundTransparency = 1
+JumpLabel.Position = UDim2.new(0, 10, 0, 15)
+JumpLabel.Size = UDim2.new(0, 100, 0, 30)
+JumpLabel.Text = "无限跳跃"
+JumpLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+JumpLabel.TextSize = 16
+JumpLabel.TextXAlignment = Enum.TextXAlignment.Left
+JumpLabel.Font = Enum.Font.SourceSansBold
+
+JumpToggleBackground.Name = "JumpToggleBackground"
+JumpToggleBackground.Parent = Frame
+JumpToggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+JumpToggleBackground.BorderSizePixel = 0
+JumpToggleBackground.Position = UDim2.new(0, 130, 0, 15)
+JumpToggleBackground.Size = UDim2.new(0, 60, 0, 30)
+JumpToggleBackground.Text = ""
+JumpToggleBackground.Active = true
+
+local JumpToggleBackgroundCorner = Instance.new("UICorner")
+JumpToggleBackgroundCorner.Parent = JumpToggleBackground
+JumpToggleBackgroundCorner.CornerRadius = UDim.new(0, 15)
+
+JumpToggleSlider.Name = "JumpToggleSlider"
+JumpToggleSlider.Parent = JumpToggleBackground
+JumpToggleSlider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+JumpToggleSlider.BorderSizePixel = 0
+JumpToggleSlider.Size = UDim2.new(0, 30, 0, 30)
+JumpToggleSlider.Position = UDim2.new(0, 0, 0, 0)
+
+local JumpToggleSliderCorner = Instance.new("UICorner")
+JumpToggleSliderCorner.Parent = JumpToggleSlider
+JumpToggleSliderCorner.CornerRadius = UDim.new(0, 15)
+
+-- 无限跳跃功能变量
+local InfiniteJumpEnabled = false
+local isJumpAnimating = false
+
+-- 无限跳跃功能
+JumpToggleBackground.MouseButton1Click:Connect(function()
+    if isJumpAnimating then return end
+    
+    InfiniteJumpEnabled = not InfiniteJumpEnabled
+    isJumpAnimating = true
+    
+    local targetPosition
+    if InfiniteJumpEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        JumpToggleBackground.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        JumpToggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(JumpToggleSlider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isJumpAnimating = false
+    end)
+end)
+
+game:GetService("UserInputService").JumpRequest:connect(function()
+    if InfiniteJumpEnabled and character and character:FindFirstChildOfClass'Humanoid' then
+        character:FindFirstChildOfClass'Humanoid':ChangeState("Jumping")
+    end
+end)
+
+-- 角色重生时重新获取角色
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+end)
+
+ScreenGui.ResetOnSpawn = false

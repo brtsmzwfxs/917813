@@ -1,0 +1,927 @@
+local ScreenGui = Instance.new("ScreenGui")
+local Frame = Instance.new("Frame")
+
+ScreenGui.Parent = game.CoreGui
+ScreenGui.Name = "MainGUI"
+
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+end)
+
+local screenSize = workspace.CurrentCamera.ViewportSize
+local centerX = (screenSize.X - 350) / 2
+local centerY = (screenSize.Y - 250) / 2
+
+Frame.Name = "Frame"
+Frame.Parent = ScreenGui
+Frame.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+Frame.BackgroundTransparency = 0.4
+Frame.Position = UDim2.new(0, centerX, 0, centerY - 50)
+Frame.Size = UDim2.new(0, 350, 0, 250)
+Frame.Active = true
+Frame.Draggable = true
+
+local FrameCorner = Instance.new("UICorner")
+FrameCorner.Parent = Frame
+FrameCorner.CornerRadius = UDim.new(0, 12)
+
+-- 创建滚动框架
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Parent = Frame
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.Position = UDim2.new(0, 10, 0, 10)
+ScrollFrame.Size = UDim2.new(0, 330, 0, 230)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 600)  -- 增加画布大小以容纳新功能
+ScrollFrame.ScrollBarThickness = 8
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(200, 200, 200)
+-- 设置只能垂直滚动
+ScrollFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+ScrollFrame.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+ScrollFrame.ScrollBarImageTransparency = 0.5
+
+-- 功能变量
+local originalWalkSpeed = 16
+local originalJumpHeight = 7.2
+local originalGravity = workspace.Gravity
+local InfiniteJumpEnabled = false
+local NoclipEnabled = false
+local SpeedEnabled = false
+local JumpPowerEnabled = false
+local GravityEnabled = false
+local FlyEnabled = false
+local TranslationEnabled = false
+local isJumpAnimating = false
+local isNoclipAnimating = false
+local isSpeedAnimating = false
+local isJumpPowerAnimating = false
+local isGravityAnimating = false
+local isTranslationAnimating = false
+local SteppedConnection = nil
+local speedConnection = nil
+local isFlyAnimating = false
+local flyConnection = nil
+local bg = nil
+local bv = nil
+local flySpeed = 50
+local ctrl = {f = 0, b = 0, l = 0, r = 0, u = 0, d = 0}
+local lastctrl = {f = 0, b = 0, l = 0, r = 0, u = 0, d = 0}
+
+-- 飞行摇杆控制变量
+local joystickActive = false
+local joystickPosition = Vector2.new(0, 0)
+local joystickCenter = Vector2.new(0, 0)
+local joystickRadius = 100
+local activeTouchId = nil
+
+-- 手机飞行控制按钮
+local UpButton = Instance.new("TextButton")
+local DownButton = Instance.new("TextButton")
+local FlyJoystick = Instance.new("Frame")
+local FlyJoystickThumb = Instance.new("Frame")
+
+-- 创建手机控制按钮
+UpButton.Name = "UpButton"
+UpButton.Parent = ScreenGui
+UpButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+UpButton.BackgroundTransparency = 0.9
+UpButton.BorderSizePixel = 0
+UpButton.Position = UDim2.new(0.8, 0, 0.3, -25)
+UpButton.Size = UDim2.new(0, 70, 0, 70)
+UpButton.Text = "↑"
+UpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+UpButton.TextSize = 20
+UpButton.Visible = false
+
+local UpButtonCorner = Instance.new("UICorner")
+UpButtonCorner.Parent = UpButton
+UpButtonCorner.CornerRadius = UDim.new(0, 12)
+
+DownButton.Name = "DownButton"
+DownButton.Parent = ScreenGui
+DownButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+DownButton.BackgroundTransparency = 0.9
+DownButton.BorderSizePixel = 0
+DownButton.Position = UDim2.new(0.8, 0, 0.5, -25)
+DownButton.Size = UDim2.new(0, 70, 0, 70)
+DownButton.Text = "↓"
+DownButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+DownButton.TextSize = 20
+DownButton.Visible = false
+
+local DownButtonCorner = Instance.new("UICorner")
+DownButtonCorner.Parent = DownButton
+DownButtonCorner.CornerRadius = UDim.new(0, 12)
+
+-- 手机飞行控制摇杆
+FlyJoystick.Name = "FlyJoystick"
+FlyJoystick.Parent = ScreenGui
+FlyJoystick.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+FlyJoystick.BackgroundTransparency = 1
+FlyJoystick.BorderSizePixel = 0
+FlyJoystick.Size = UDim2.new(0, 330, 0, 330)
+FlyJoystick.Visible = false
+FlyJoystick.ZIndex = 10
+
+local FlyJoystickCorner = Instance.new("UICorner")
+FlyJoystickCorner.Parent = FlyJoystick
+FlyJoystickCorner.CornerRadius = UDim.new(0, 60)
+
+FlyJoystickThumb.Name = "FlyJoystickThumb"
+FlyJoystickThumb.Parent = FlyJoystick
+FlyJoystickThumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+FlyJoystickThumb.BackgroundTransparency = 1
+FlyJoystickThumb.BorderSizePixel = 0
+FlyJoystickThumb.Size = UDim2.new(0, 40, 0, 40)
+FlyJoystickThumb.ZIndex = 11
+
+local FlyJoystickThumbCorner = Instance.new("UICorner")
+FlyJoystickThumbCorner.Parent = FlyJoystickThumb
+FlyJoystickThumbCorner.CornerRadius = UDim.new(0, 20)
+
+-- 平移功能变量
+local tpWalking = false
+local translationSpeed = 50
+
+-- 存储原始碰撞状态
+local originalCollisionStates = {}
+
+-- 创建功能控件
+local function createToggleControl(name, yPosition)
+    local label = Instance.new("TextLabel")
+    label.Name = name .. "Label"
+    label.Parent = ScrollFrame
+    label.BackgroundTransparency = 1
+    label.Position = UDim2.new(0, 0, 0, yPosition)
+    label.Size = UDim2.new(0, 120, 0, 30)
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.SourceSansBold
+
+    local toggleBackground = Instance.new("TextButton")
+    toggleBackground.Name = name .. "ToggleBackground"
+    toggleBackground.Parent = ScrollFrame
+    toggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    toggleBackground.BorderSizePixel = 0
+    toggleBackground.Position = UDim2.new(0, 250, 0, yPosition)
+    toggleBackground.Size = UDim2.new(0, 60, 0, 30)
+    toggleBackground.Text = ""
+    toggleBackground.Active = true
+
+    local toggleBackgroundCorner = Instance.new("UICorner")
+    toggleBackgroundCorner.Parent = toggleBackground
+    toggleBackgroundCorner.CornerRadius = UDim.new(0, 15)
+
+    local toggleSlider = Instance.new("Frame")
+    toggleSlider.Name = name .. "ToggleSlider"
+    toggleSlider.Parent = toggleBackground
+    toggleSlider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    toggleSlider.BorderSizePixel = 0
+    toggleSlider.Size = UDim2.new(0, 30, 0, 30)
+    toggleSlider.Position = UDim2.new(0, 0, 0, 0)
+
+    local toggleSliderCorner = Instance.new("UICorner")
+    toggleSliderCorner.Parent = toggleSlider
+    toggleSliderCorner.CornerRadius = UDim.new(0, 15)
+    
+    return {label = label, background = toggleBackground, slider = toggleSlider}
+end
+
+-- 创建带文本框的控件
+local function createTextToggleControl(name, yPosition, defaultValue)
+    local label = Instance.new("TextLabel")
+    label.Name = name .. "Label"
+    label.Parent = ScrollFrame
+    label.BackgroundTransparency = 1
+    label.Position = UDim2.new(0, 0, 0, yPosition)
+    label.Size = UDim2.new(0, 120, 0, 30)
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Font = Enum.Font.SourceSansBold
+
+    local textBox = Instance.new("TextBox")
+    textBox.Name = name .. "TextBox"
+    textBox.Parent = ScrollFrame
+    textBox.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+    textBox.BackgroundTransparency = 0.5
+    textBox.BorderSizePixel = 0
+    textBox.Position = UDim2.new(0, 180, 0, yPosition)
+    textBox.Size = UDim2.new(0, 60, 0, 30)
+    textBox.Text = tostring(defaultValue)
+    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.TextSize = 16
+    textBox.TextXAlignment = Enum.TextXAlignment.Center
+    textBox.PlaceholderColor3 = Color3.fromRGB(200, 200, 200)
+
+    local textBoxCorner = Instance.new("UICorner")
+    textBoxCorner.Parent = textBox
+    textBoxCorner.CornerRadius = UDim.new(0, 8)
+
+    local toggleBackground = Instance.new("TextButton")
+    toggleBackground.Name = name .. "ToggleBackground"
+    toggleBackground.Parent = ScrollFrame
+    toggleBackground.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    toggleBackground.BorderSizePixel = 0
+    toggleBackground.Position = UDim2.new(0, 250, 0, yPosition)
+    toggleBackground.Size = UDim2.new(0, 60, 0, 30)
+    toggleBackground.Text = ""
+    toggleBackground.Active = true
+
+    local toggleBackgroundCorner = Instance.new("UICorner")
+    toggleBackgroundCorner.Parent = toggleBackground
+    toggleBackgroundCorner.CornerRadius = UDim.new(0, 15)
+
+    local toggleSlider = Instance.new("Frame")
+    toggleSlider.Name = name .. "ToggleSlider"
+    toggleSlider.Parent = toggleBackground
+    toggleSlider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    toggleSlider.BorderSizePixel = 0
+    toggleSlider.Size = UDim2.new(0, 30, 0, 30)
+    toggleSlider.Position = UDim2.new(0, 0, 0, 0)
+
+    local toggleSliderCorner = Instance.new("UICorner")
+    toggleSliderCorner.Parent = toggleSlider
+    toggleSliderCorner.CornerRadius = UDim.new(0, 15)
+    
+    return {label = label, textBox = textBox, background = toggleBackground, slider = toggleSlider}
+end
+
+-- 创建所有功能控件
+local jumpControl = createToggleControl("无限跳跃", 0)
+local noclipControl = createToggleControl("穿墙模式", 40)
+local speedControl = createTextToggleControl("速度控制", 80, 16)
+local translationControl = createTextToggleControl("平移模式", 120, 50)
+local jumpPowerControl = createTextToggleControl("跳跃高度", 160, 7.2)
+local gravityControl = createTextToggleControl("重力控制", 200, 196.2)
+local flyControl = createTextToggleControl("飞行模式", 240, 50)
+
+-- 初始化角色
+local function initializeCharacter()
+    character = player.Character or player.CharacterAdded:Wait()
+    
+    if character and character:FindFirstChildOfClass("Humanoid") then
+        originalWalkSpeed = character:FindFirstChildOfClass("Humanoid").WalkSpeed
+        originalJumpHeight = character:FindFirstChildOfClass("Humanoid").JumpHeight
+    end
+    
+    -- 重置原始碰撞状态
+    originalCollisionStates = {}
+end
+
+player.CharacterAdded:Connect(function(newCharacter)
+    initializeCharacter()
+end)
+
+initializeCharacter()
+
+-- 无限跳跃功能
+jumpControl.background.MouseButton1Click:Connect(function()
+    if isJumpAnimating then return end
+    
+    InfiniteJumpEnabled = not InfiniteJumpEnabled
+    isJumpAnimating = true
+    
+    local targetPosition
+    if InfiniteJumpEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        jumpControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        jumpControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(jumpControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isJumpAnimating = false
+    end)
+end)
+
+game:GetService("UserInputService").JumpRequest:connect(function()
+    if InfiniteJumpEnabled and character and character:FindFirstChildOfClass'Humanoid' then
+        character:FindFirstChildOfClass'Humanoid':ChangeState("Jumping")
+    end
+end)
+
+-- 存储原始碰撞状态的函数
+local function storeOriginalCollisionStates()
+    if not character then return end
+    
+    originalCollisionStates = {}
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            originalCollisionStates[part] = part.CanCollide
+        end
+    end
+end
+
+-- 恢复原始碰撞状态的函数
+local function restoreOriginalCollisionStates()
+    if not character then return end
+    
+    for part, canCollide in pairs(originalCollisionStates) do
+        if part and part.Parent then
+            part.CanCollide = canCollide
+        end
+    end
+end
+
+-- 改进的穿墙功能
+noclipControl.background.MouseButton1Click:Connect(function()
+    if isNoclipAnimating then return end
+    
+    NoclipEnabled = not NoclipEnabled
+    isNoclipAnimating = true
+    
+    local targetPosition
+    if NoclipEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        noclipControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        -- 存储原始碰撞状态
+        storeOriginalCollisionStates()
+        
+        -- 使用更稳定的穿墙代码
+        if SteppedConnection then
+            SteppedConnection:Disconnect()
+        end
+        
+        SteppedConnection = game:GetService("RunService").Stepped:Connect(function()
+            if not NoclipEnabled then 
+                SteppedConnection:Disconnect()
+                return 
+            end
+            
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        noclipControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        if SteppedConnection then
+            SteppedConnection:Disconnect()
+            SteppedConnection = nil
+        end
+        
+        -- 恢复原始碰撞状态（包括饰品）
+        restoreOriginalCollisionStates()
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(noclipControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isNoclipAnimating = false
+    end)
+end)
+
+-- 速度控制功能
+speedControl.background.MouseButton1Click:Connect(function()
+    if isSpeedAnimating then return end
+    
+    SpeedEnabled = not SpeedEnabled
+    isSpeedAnimating = true
+    
+    local targetPosition
+    if SpeedEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        speedControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        speedControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            character:FindFirstChildOfClass("Humanoid").WalkSpeed = originalWalkSpeed
+        end
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(speedControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isSpeedAnimating = false
+    end)
+end)
+
+-- 平移控制功能
+translationControl.background.MouseButton1Click:Connect(function()
+    if isTranslationAnimating then return end
+    
+    TranslationEnabled = not TranslationEnabled
+    isTranslationAnimating = true
+    
+    local targetPosition
+    if TranslationEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        translationControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        startTranslation()
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        translationControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        stopTranslation()
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(translationControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isTranslationAnimating = false
+    end)
+end)
+
+-- 开始平移功能
+function startTranslation()
+    if tpWalking then return end
+    
+    tpWalking = true
+    
+    spawn(function()
+        local lastUpdate = tick()
+        
+        while tpWalking and character and character:FindFirstChildOfClass("Humanoid") do
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if not humanoid then break end
+            
+            game:GetService("RunService").Heartbeat:Wait()
+            
+            if humanoid.MoveDirection.Magnitude > 0 then
+                -- 计算基于时间的移动量
+                local currentTime = tick()
+                local deltaTime = currentTime - lastUpdate
+                lastUpdate = currentTime
+                
+                -- 获取平移速度
+                local speedNumber = tonumber(translationControl.textBox.Text) or 50
+                translationSpeed = math.max(1, speedNumber)
+                
+                -- 核心平移逻辑
+                local moveVector = humanoid.MoveDirection.Unit * translationSpeed * deltaTime
+                character:TranslateBy(moveVector)
+            else
+                lastUpdate = tick()
+            end
+        end
+    end)
+end
+
+-- 停止平移功能
+function stopTranslation()
+    tpWalking = false
+end
+
+-- 跳跃高度功能
+jumpPowerControl.background.MouseButton1Click:Connect(function()
+    if isJumpPowerAnimating then return end
+    
+    JumpPowerEnabled = not JumpPowerEnabled
+    isJumpPowerAnimating = true
+    
+    local targetPosition
+    if JumpPowerEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        jumpPowerControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            local value = tonumber(jumpPowerControl.textBox.Text)
+            if value then
+                character:FindFirstChildOfClass("Humanoid").JumpHeight = value
+            end
+        end
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        jumpPowerControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            character:FindFirstChildOfClass("Humanoid").JumpHeight = originalJumpHeight
+        end
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(jumpPowerControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isJumpPowerAnimating = false
+    end)
+end)
+
+-- 重力控制功能
+gravityControl.background.MouseButton1Click:Connect(function()
+    if isGravityAnimating then return end
+    
+    GravityEnabled = not GravityEnabled
+    isGravityAnimating = true
+    
+    local targetPosition
+    if GravityEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        gravityControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        local value = tonumber(gravityControl.textBox.Text)
+        if value then
+            workspace.Gravity = value
+        end
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        gravityControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        workspace.Gravity = originalGravity
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(gravityControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isGravityAnimating = false
+    end)
+end)
+
+-- 改进的飞行控制功能（移植自下面脚本）
+-- 手机摇杆控制函数
+local function updateJoystick(input)
+    if not FlyEnabled then return end
+    
+    local touchPos = Vector2.new(input.Position.X, input.Position.Y)
+    
+    if joystickActive then
+        local delta = touchPos - joystickCenter
+        local distance = math.min(delta.Magnitude, joystickRadius)
+        local direction = delta.Unit
+        
+        joystickPosition = direction * (distance / joystickRadius)
+        
+        -- 更新摇杆拇指位置 (相对于摇杆中心)
+        FlyJoystickThumb.Position = UDim2.new(
+            0.5, joystickPosition.X * joystickRadius, 
+            0.5, joystickPosition.Y * joystickRadius
+        )
+    end
+end
+
+-- 全局触摸监听
+local function handleGlobalTouch(input, state)
+    if not FlyEnabled then return end
+    
+    local touchPos = Vector2.new(input.Position.X, input.Position.Y)
+    local screenCenterX = workspace.CurrentCamera.ViewportSize.X / 2
+    
+    if state == Enum.UserInputState.Begin then
+        -- 只在左边屏幕且没有其他激活的触摸时激活摇杆
+        if touchPos.X < screenCenterX and not joystickActive then
+            -- 设置摇杆中心为触摸位置
+            joystickCenter = touchPos
+            activeTouchId = input -- 记录激活的触摸ID
+            
+            -- 定位摇杆到触摸位置
+            FlyJoystick.Position = UDim2.new(
+                0, joystickCenter.X - joystickRadius,
+                0, joystickCenter.Y - joystickRadius
+            )
+            
+            -- 重置拇指位置到中心
+            FlyJoystickThumb.Position = UDim2.new(0.5, 0, 0.5, 0)
+            
+            joystickActive = true
+            FlyJoystick.Visible = true
+        end
+        
+    elseif state == Enum.UserInputState.End then
+        -- 检查是否是当前激活的摇杆触摸结束
+        if joystickActive and activeTouchId == input then
+            joystickActive = false
+            FlyJoystick.Visible = false
+            joystickPosition = Vector2.new(0, 0)
+            activeTouchId = nil -- 清除触摸ID
+        end
+    end
+end
+
+-- 连接全局触摸事件
+game:GetService("UserInputService").InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        handleGlobalTouch(input, Enum.UserInputState.Begin)
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        handleGlobalTouch(input, Enum.UserInputState.End)
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch and joystickActive then
+        updateJoystick(input)
+    end
+end)
+
+-- 手机上升下降按钮控制
+UpButton.MouseButton1Down:Connect(function()
+    ctrl.u = 1
+    ctrl.d = 0
+end)
+
+UpButton.MouseButton1Up:Connect(function()
+    ctrl.u = 0
+end)
+
+DownButton.MouseButton1Down:Connect(function()
+    ctrl.d = -1
+    ctrl.u = 0
+end)
+
+DownButton.MouseButton1Up:Connect(function()
+    ctrl.d = 0
+end)
+
+UpButton.TouchTap:Connect(function()
+    ctrl.u = 1
+    ctrl.d = 0
+    wait(0.1)
+    ctrl.u = 0
+end)
+
+DownButton.TouchTap:Connect(function()
+    ctrl.d = -1
+    ctrl.u = 0
+    wait(0.1)
+    ctrl.d = 0
+end)
+
+-- 键盘输入监听（用于PC控制）
+local function handleKeyInput(input, isPressed)
+    if not FlyEnabled then return end
+    
+    -- 前后移动
+    if input.KeyCode == Enum.KeyCode.W then
+        ctrl.f = isPressed and 1 or 0
+    elseif input.KeyCode == Enum.KeyCode.S then
+        ctrl.b = isPressed and -1 or 0
+    end
+    
+    -- 左右移动
+    if input.KeyCode == Enum.KeyCode.A then
+        ctrl.l = isPressed and -1 or 0
+    elseif input.KeyCode == Enum.KeyCode.D then
+        ctrl.r = isPressed and 1 or 0
+    end
+    
+    -- 上下移动
+    if input.KeyCode == Enum.KeyCode.Space then
+        ctrl.u = isPressed and 1 or 0
+    elseif input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.LeftShift then
+        ctrl.d = isPressed and -1 or 0
+    end
+end
+
+-- 飞行控制功能（改进版）
+flyControl.background.MouseButton1Click:Connect(function()
+    if isFlyAnimating then return end
+    
+    FlyEnabled = not FlyEnabled
+    isFlyAnimating = true
+    
+    local targetPosition
+    if FlyEnabled then
+        targetPosition = UDim2.new(0, 30, 0, 0)
+        flyControl.background.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        
+        -- 启用飞行
+        if character then
+            local UpperTorso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+            if UpperTorso then
+                if bg then bg:Destroy() end
+                if bv then bv:Destroy() end
+                
+                bg = Instance.new("BodyGyro", UpperTorso)
+                bg.P = 9e4
+                bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+                bg.cframe = UpperTorso.CFrame
+                
+                bv = Instance.new("BodyVelocity", UpperTorso)
+                bv.velocity = Vector3.new(0, 0.1, 0)
+                bv.maxForce = Vector3.new(9e9, 9e9, 9e9)
+                
+                character.Humanoid.PlatformStand = true
+                
+                flySpeed = 0
+                
+                if flyConnection then
+                    flyConnection:Disconnect()
+                end
+                
+                -- 改进的飞行控制逻辑
+                flyConnection = game:GetService("RunService").Heartbeat:Connect(function()
+                    if FlyEnabled and character and UpperTorso and bg and bv then
+                        local cam = workspace.CurrentCamera
+                        
+                        -- 动态摇杆控制算法（平滑加速减速）
+                        local hasJoystickInput = joystickActive and joystickPosition.Magnitude > 0
+                        local hasKeyboardInput = (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0 or (ctrl.u + ctrl.d) ~= 0
+                        local hasAnyInput = hasJoystickInput or hasKeyboardInput
+                        
+                        local targetFlySpeed = tonumber(flyControl.textBox.Text) or 50
+                        
+                        -- 速度控制逻辑：有输入时加速，无输入时减速
+                        if hasAnyInput then
+                            -- 有输入时加速到目标速度
+                            flySpeed = math.min(flySpeed + 1, targetFlySpeed)
+                        else
+                            -- 无输入时逐渐减速
+                            flySpeed = math.max(flySpeed - 2, 0)
+                        end
+                        
+                        -- 计算移动方向
+                        local moveDirection = Vector3.new(0, 0, 0)
+                        
+                        if hasJoystickInput then
+                            -- 摇杆控制：X轴控制左右，Y轴控制前后
+                            moveDirection = Vector3.new(joystickPosition.X, ctrl.u + ctrl.d, joystickPosition.Y)
+                            lastctrl = {f = 0, b = 0, l = 0, r = 0, u = ctrl.u, d = ctrl.d}
+                        elseif hasKeyboardInput then
+                            -- 键盘控制
+                            moveDirection = Vector3.new(ctrl.l + ctrl.r, ctrl.u + ctrl.d, ctrl.f + ctrl.b)
+                            lastctrl = {f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r, u = ctrl.u, d = ctrl.d}
+                        elseif flySpeed > 0 then
+                            -- 保持最后的方向（惯性滑行）
+                            moveDirection = Vector3.new(lastctrl.l + lastctrl.r, lastctrl.u + lastctrl.d, lastctrl.f + lastctrl.b)
+                        end
+                        
+                        -- 应用移动速度
+                        if moveDirection.Magnitude > 0 then
+                            bv.velocity = cam.CFrame:VectorToWorldSpace(moveDirection.Unit) * flySpeed
+                        else
+                            bv.velocity = Vector3.new(0, 0, 0)
+                        end
+                        
+                        bg.cframe = cam.CoordinateFrame
+                    end
+                end)
+                
+                -- 在手机上显示控制按钮
+                if game:GetService("UserInputService").TouchEnabled then
+                    UpButton.Visible = true
+                    DownButton.Visible = true
+                    FlyJoystick.Visible = true
+                end
+            end
+        end
+    else
+        targetPosition = UDim2.new(0, 0, 0, 0)
+        flyControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        if flyConnection then
+            flyConnection:Disconnect()
+            flyConnection = nil
+        end
+        
+        if bg then bg:Destroy(); bg = nil end
+        if bv then bv:Destroy(); bv = nil end
+        
+        if character then
+            character.Humanoid.PlatformStand = false
+            character.Humanoid:ChangeState(Enum.HumanoidStateType.Landed)
+        end
+        
+        -- 隐藏手机按钮
+        UpButton.Visible = false
+        DownButton.Visible = false
+        FlyJoystick.Visible = false
+        
+        ctrl = {f = 0, b = 0, l = 0, r = 0, u = 0, d = 0}
+        lastctrl = {f = 0, b = 0, l = 0, r = 0, u = 0, d = 0}
+        joystickActive = false
+        flySpeed = 0
+    end
+    
+    local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = game:GetService("TweenService"):Create(flyControl.slider, tweenInfo, {Position = targetPosition})
+    tween:Play()
+    
+    tween.Completed:Connect(function()
+        isFlyAnimating = false
+    end)
+end)
+
+-- 连接键盘输入事件
+game:GetService("UserInputService").InputBegan:Connect(function(input)
+    handleKeyInput(input, true)
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    handleKeyInput(input, false)
+end)
+
+-- 实时更新功能
+speedConnection = game:GetService("RunService").RenderStepped:Connect(function()
+    if SpeedEnabled and character and character:FindFirstChildOfClass("Humanoid") then
+        local value = tonumber(speedControl.textBox.Text)
+        if value then
+            character:FindFirstChildOfClass("Humanoid").WalkSpeed = value
+        end
+    end
+end)
+
+-- 平移速度实时更新
+translationControl.textBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local newSpeed = tonumber(translationControl.textBox.Text)
+    if newSpeed then
+        translationSpeed = math.max(1, newSpeed)
+    end
+end)
+
+jumpPowerControl.textBox:GetPropertyChangedSignal("Text"):Connect(function()
+    if JumpPowerEnabled and character and character:FindFirstChildOfClass("Humanoid") then
+        local value = tonumber(jumpPowerControl.textBox.Text)
+        if value then
+            character:FindFirstChildOfClass("Humanoid").JumpHeight = value
+        end
+    end
+end)
+
+gravityControl.textBox:GetPropertyChangedSignal("Text"):Connect(function()
+    if GravityEnabled then
+        local value = tonumber(gravityControl.textBox.Text)
+        if value then
+            workspace.Gravity = value
+        end
+    end
+end)
+
+flyControl.textBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local newSpeed = tonumber(flyControl.textBox.Text)
+    if newSpeed then
+        flySpeed = newSpeed
+    end
+end)
+
+-- 角色重生时清理
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    
+    -- 重置飞行状态
+    if FlyEnabled then
+        if flyConnection then
+            flyConnection:Disconnect()
+            flyConnection = nil
+        end
+        if bg then bg:Destroy() end
+        if bv then bv:Destroy() end
+        FlyEnabled = false
+        flyControl.slider.Position = UDim2.new(0, 0, 0, 0)
+        flyControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        
+        -- 隐藏手机按钮
+        UpButton.Visible = false
+        DownButton.Visible = false
+        FlyJoystick.Visible = false
+    end
+    
+    -- 重置穿墙状态
+    if NoclipEnabled then
+        if SteppedConnection then
+            SteppedConnection:Disconnect()
+            SteppedConnection = nil
+        end
+        NoclipEnabled = false
+        noclipControl.slider.Position = UDim2.new(0, 0, 0, 0)
+        noclipControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+    
+    -- 重置平移状态
+    if TranslationEnabled then
+        stopTranslation()
+        TranslationEnabled = false
+        translationControl.slider.Position = UDim2.new(0, 0, 0, 0)
+        translationControl.background.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+    
+    -- 重新初始化角色
+    initializeCharacter()
+    
+    -- 如果平移是开启状态，重新启动
+    if TranslationEnabled then
+        startTranslation()
+    end
+end)
+
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling

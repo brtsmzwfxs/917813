@@ -6,6 +6,7 @@ local M = {
     enabled = false,
     conns = {},
     charConn = nil,
+    jumpConn = nil,
 }
 
 local player = Players.LocalPlayer
@@ -83,8 +84,9 @@ end
 function M.Enable()
     if M.enabled then return end
     M.enabled = true
-    local jumpCon = UserInputService.JumpRequest:Connect(onJumpRequest)
-    table.insert(M.conns, jumpCon)
+    if not M.jumpConn then
+        M.jumpConn = UserInputService.JumpRequest:Connect(onJumpRequest)
+    end
     local char = player.Character or player.CharacterAdded:Wait()
     startFallImmunityForChar(char)
 end
@@ -92,6 +94,8 @@ end
 function M.Disable()
     if not M.enabled then return end
     M.enabled = false
+    safeDisconnect(M.jumpConn)
+    M.jumpConn = nil
     clearConns()
 end
 

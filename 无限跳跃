@@ -1,0 +1,114 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local M = {
+    enabled = false,
+    conns = {},
+    charConn = nil,
+}
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function clearConns()
+    for _, c in ipairs(M.conns) do
+        safeDisconnect(c)
+    end
+    M.conns = {}
+end
+
+local function startFallImmunityForChar(char)
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("RootPart")
+    if not root then
+        root = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5) or char:FindFirstChild("RootPart")
+    end
+    if not root then return end
+
+    local zero = Vector3.new(0, 0, 0)
+    local hbCon
+    hbCon = RunService.Heartbeat:Connect(function()
+        if not root or not root.Parent then
+            if hbCon then hbCon:Disconnect() end
+            return
+        end
+        local ok, v = pcall(function() return root.AssemblyLinearVelocity end)
+        if ok and v then
+            pcall(function() root.AssemblyLinearVelocity = zero end)
+            RunService.RenderStepped:Wait()
+            if root and root.Parent then
+                pcall(function() root.AssemblyLinearVelocity = v end)
+            end
+        end
+    end)
+    table.insert(M.conns, hbCon)
+end
+
+local function onJumpRequest()
+    if not M.enabled then return end
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Jumping) end)
+    end
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.charConn = player.CharacterAdded:Connect(function(newChar)
+        if M.enabled then
+            clearConns()
+            task.wait(0.05)
+            startFallImmunityForChar(newChar)
+        end
+    end)
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    local jumpCon = UserInputService.JumpRequest:Connect(onJumpRequest)
+    table.insert(M.conns, jumpCon)
+    local char = player.Character or player.CharacterAdded:Wait()
+    startFallImmunityForChar(char)
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    M.enabled = false
+    clearConns()
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+pcall(function() M.Init() end)
+
+return M

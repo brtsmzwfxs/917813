@@ -73,10 +73,13 @@ end
 function M.Init()
     if M.charConn then return end
     M.charConn = player.CharacterAdded:Connect(function(newChar)
+        clearConns()
+        task.wait(0.05)
         if M.enabled then
-            clearConns()
-            task.wait(0.05)
             startFallImmunityForChar(newChar)
+            if not M.jumpConn then
+                M.jumpConn = UserInputService.JumpRequest:Connect(onJumpRequest)
+            end
         end
     end)
 end

@@ -1,0 +1,137 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local M = {
+    enabled = false,
+    conns = {},
+    charConn = nil,
+    noclipConn = nil,
+    originalCollisionStates = {},
+}
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local character = player.Character or player.CharacterAdded:Wait()
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function storeOriginalCollisionStates()
+    if not character then return end
+    M.originalCollisionStates = {}
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            M.originalCollisionStates[part] = part.CanCollide
+        end
+    end
+end
+
+local function restoreOriginalCollisionStates()
+    for part, canCollide in pairs(M.originalCollisionStates) do
+        if part and part.Parent then
+            pcall(function() part.CanCollide = canCollide end)
+        end
+    end
+    M.originalCollisionStates = {}
+end
+
+local function clearConns()
+    for _, c in ipairs(M.conns) do
+        safeDisconnect(c)
+    end
+    M.conns = {}
+    if M.noclipConn then
+        safeDisconnect(M.noclipConn)
+        M.noclipConn = nil
+    end
+end
+
+local function startNoclipForChar(char)
+    if not char then return end
+    character = char
+    storeOriginalCollisionStates()
+    if M.noclipConn then
+        safeDisconnect(M.noclipConn)
+        M.noclipConn = nil
+    end
+    M.noclipConn = RunService.Stepped:Connect(function()
+        if not M.enabled or not character then
+            if M.noclipConn then safeDisconnect(M.noclipConn); M.noclipConn = nil end
+            return
+        end
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function() part.CanCollide = false end)
+            end
+        end
+    end)
+    table.insert(M.conns, M.noclipConn)
+end
+
+local function stopNoclip()
+    M.enabled = false
+    if M.noclipConn then
+        safeDisconnect(M.noclipConn)
+        M.noclipConn = nil
+    end
+    restoreOriginalCollisionStates()
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.charConn = player.CharacterAdded:Connect(function(newChar)
+        clearConns()
+        character = newChar
+        task.wait(0.2)
+        if M.enabled then
+            startNoclipForChar(newChar)
+        else
+            M.originalCollisionStates = {}
+        end
+    end)
+    table.insert(M.conns, M.charConn)
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    if not character or not character.Parent then
+        character = player.Character or player.CharacterAdded:Wait()
+    end
+    startNoclipForChar(character)
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    stopNoclip()
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+pcall(function() M.Init() end)
+
+return M

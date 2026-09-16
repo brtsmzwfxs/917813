@@ -1,0 +1,176 @@
+local Lighting = game:GetService("Lighting")
+
+if not Lighting then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        IsEnabled = function() return false end,
+        GetConfig = function() return {} end,
+        SetConfig = function() end,
+        Update = function() end,
+    }
+end
+
+local M = {
+    enabled = false,
+    original = {
+        FogStart = nil,
+        FogEnd = nil,
+        Brightness = nil,
+        Ambient = nil,
+        OutdoorAmbient = nil,
+        GlobalShadows = nil,
+        Atmosphere = {
+            exists = false,
+            Density = nil,
+            Enabled = nil,
+        },
+    },
+    -- default override values (matches your snippet)
+    config = {
+        FogStart = 0,
+        FogEnd = 1e6,
+        Brightness = 2,
+        Ambient = Color3.fromRGB(240, 240, 240),
+        OutdoorAmbient = Color3.fromRGB(240, 240, 240),
+        GlobalShadows = false,
+        Atmosphere = {
+            Density = 0,
+            Enabled = false,
+        },
+    },
+}
+
+local function safeGet(prop)
+    local ok, val = pcall(function() return Lighting[prop] end)
+    if ok then return val end
+    return nil
+end
+
+local function safeSet(prop, val)
+    pcall(function() Lighting[prop] = val end)
+end
+
+local function recordOriginals()
+    if M.original.FogStart == nil then M.original.FogStart = safeGet("FogStart") end
+    if M.original.FogEnd == nil then M.original.FogEnd = safeGet("FogEnd") end
+    if M.original.Brightness == nil then M.original.Brightness = safeGet("Brightness") end
+    if M.original.Ambient == nil then M.original.Ambient = safeGet("Ambient") end
+    if M.original.OutdoorAmbient == nil then M.original.OutdoorAmbient = safeGet("OutdoorAmbient") end
+    if M.original.GlobalShadows == nil then M.original.GlobalShadows = safeGet("GlobalShadows") end
+
+    local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+    if atm then
+        M.original.Atmosphere.exists = true
+        if M.original.Atmosphere.Density == nil then
+            pcall(function() M.original.Atmosphere.Density = atm.Density end)
+        end
+        if M.original.Atmosphere.Enabled == nil then
+            pcall(function() M.original.Atmosphere.Enabled = atm.Enabled end)
+        end
+    else
+        M.original.Atmosphere.exists = false
+    end
+end
+
+local function applyConfig(cfg)
+    if not cfg then cfg = M.config end
+
+    if cfg.FogStart ~= nil then safeSet("FogStart", cfg.FogStart) end
+    if cfg.FogEnd ~= nil then safeSet("FogEnd", cfg.FogEnd) end
+    if cfg.Brightness ~= nil then safeSet("Brightness", cfg.Brightness) end
+    if cfg.Ambient ~= nil then safeSet("Ambient", cfg.Ambient) end
+    if cfg.OutdoorAmbient ~= nil then safeSet("OutdoorAmbient", cfg.OutdoorAmbient) end
+    if cfg.GlobalShadows ~= nil then safeSet("GlobalShadows", cfg.GlobalShadows) end
+
+    local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+    if atm and cfg.Atmosphere then
+        if cfg.Atmosphere.Density ~= nil then
+            pcall(function() atm.Density = cfg.Atmosphere.Density end)
+        end
+        if cfg.Atmosphere.Enabled ~= nil then
+            pcall(function() atm.Enabled = cfg.Atmosphere.Enabled end)
+        end
+    end
+end
+
+local function restoreOriginals()
+    if M.original.FogStart ~= nil then safeSet("FogStart", M.original.FogStart) end
+    if M.original.FogEnd ~= nil then safeSet("FogEnd", M.original.FogEnd) end
+    if M.original.Brightness ~= nil then safeSet("Brightness", M.original.Brightness) end
+    if M.original.Ambient ~= nil then safeSet("Ambient", M.original.Ambient) end
+    if M.original.OutdoorAmbient ~= nil then safeSet("OutdoorAmbient", M.original.OutdoorAmbient) end
+    if M.original.GlobalShadows ~= nil then safeSet("GlobalShadows", M.original.GlobalShadows) end
+
+    local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+    if atm then
+        if M.original.Atmosphere.Density ~= nil then
+            pcall(function() atm.Density = M.original.Atmosphere.Density end)
+        end
+        if M.original.Atmosphere.Enabled ~= nil then
+            pcall(function() atm.Enabled = M.original.Atmosphere.Enabled end)
+        end
+    end
+end
+
+function M.Init()
+    recordOriginals()
+end
+
+function M.Enable()
+    if M.enabled then return end
+    recordOriginals()
+    applyConfig(M.config)
+    M.enabled = true
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    restoreOriginals()
+    M.enabled = false
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+function M.GetConfig()
+    return M.config
+end
+
+function M.SetConfig(newCfg)
+    if type(newCfg) ~= "table" then return end
+    -- shallow merge
+    for k, v in pairs(newCfg) do
+        if k == "Atmosphere" and type(v) == "table" then
+            M.config.Atmosphere = M.config.Atmosphere or {}
+            for ak, av in pairs(v) do M.config.Atmosphere[ak] = av end
+        else
+            M.config[k] = v
+        end
+    end
+    if M.enabled then
+        applyConfig(M.config)
+    end
+end
+
+function M.Update(updater)
+    -- convenience: accept partial updates like { Brightness = 3 }
+    M.SetConfig(updater)
+end
+
+pcall(function() M.Init() end)
+
+return M

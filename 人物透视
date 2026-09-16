@@ -281,8 +281,8 @@ local function updateFrame()
 
         local aimPart = char:FindFirstChild(M.settings.Esp.TracerTo) or root
         local worldPos = aimPart.Position
-        local tupleX, onScreen = worldToViewport(worldPos)
-        local screenPos = Vector2.new(tupleX.X, tupleX.Y)
+        local tuple, onScreen = cam:WorldToViewportPoint(worldPos)
+        local screenPos = Vector2.new(tuple.X, tuple.Y)
         local dist = LocalRoot and (worldPos - LocalRoot.Position).Magnitude or math.huge
 
         local inDistance = dist <= (M.settings.Esp.RenderDistance or 9e9)

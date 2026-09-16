@@ -1,0 +1,110 @@
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        SetGravity = function() end,
+        GetGravity = function() return workspace.Gravity end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local M = {
+    enabled = false,
+    conns = {},
+    charConn = nil,
+    -- 当前自定义重力值
+    currentGravity = workspace.Gravity,
+    -- 初始全局重力（第一次记录）
+    originalGravity = workspace.Gravity,
+}
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function applyGravity(value)
+    local n = tonumber(value)
+    if not n then return false, "invalid number" end
+    local ok, err = pcall(function() workspace.Gravity = n end)
+    return ok, err
+end
+
+local function reapplyEnabledFeatures()
+    if M.enabled then
+        applyGravity(M.currentGravity)
+    else
+        pcall(function() workspace.Gravity = M.originalGravity end)
+    end
+end
+
+local function onCharacterAdded()
+    -- 确保首次记录 originalGravity（客户端启动或重生时）
+    M.originalGravity = M.originalGravity or workspace.Gravity
+    reapplyEnabledFeatures()
+end
+
+function M.Init()
+    if M.charConn then return end
+    -- 记录初始重力
+    M.originalGravity = M.originalGravity or workspace.Gravity
+    M.currentGravity = M.currentGravity or workspace.Gravity
+
+    M.charConn = player.CharacterAdded:Connect(function() onCharacterAdded() end)
+    table.insert(M.conns, M.charConn)
+
+    -- 尝试在当前角色上立即应用（尽管重力为全局）
+    reapplyEnabledFeatures()
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    -- 记录 originalGravity 第一次启用时也保证已记录
+    M.originalGravity = M.originalGravity or workspace.Gravity
+    applyGravity(M.currentGravity)
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    M.enabled = false
+    pcall(function() workspace.Gravity = M.originalGravity end)
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.SetGravity(n)
+    local num = tonumber(n)
+    if not num then return false end
+    M.currentGravity = num
+    if M.enabled then
+        return applyGravity(num)
+    end
+    return true
+end
+
+function M.GetGravity()
+    return M.currentGravity
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+pcall(function() M.Init() end)
+
+return M

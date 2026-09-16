@@ -19,8 +19,9 @@ local M = {
     charConn = nil,
     -- 当前自定义重力值
     currentGravity = workspace.Gravity,
-    -- 初始全局重力（第一次记录）
-    originalGravity = workspace.Gravity,
+    -- 初始全局重力（只在启用前记录一次）
+    originalGravity = nil,
+    originalRecorded = false,
 }
 
 local function safeDisconnect(c)
@@ -40,41 +41,46 @@ local function reapplyEnabledFeatures()
     if M.enabled then
         applyGravity(M.currentGravity)
     else
-        pcall(function() workspace.Gravity = M.originalGravity end)
+        if M.originalRecorded and M.originalGravity ~= nil then
+            pcall(function() workspace.Gravity = M.originalGravity end)
+        end
     end
 end
 
 local function onCharacterAdded()
-    -- 确保首次记录 originalGravity（客户端启动或重生时）
-    M.originalGravity = M.originalGravity or workspace.Gravity
+    -- 角色重生时确保如果正在启用，则重新应用自定义重力
     reapplyEnabledFeatures()
 end
 
 function M.Init()
     if M.charConn then return end
-    -- 记录初始重力
-    M.originalGravity = M.originalGravity or workspace.Gravity
     M.currentGravity = M.currentGravity or workspace.Gravity
-
-    M.charConn = player.CharacterAdded:Connect(function() onCharacterAdded() end)
+    M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
     table.insert(M.conns, M.charConn)
-
-    -- 尝试在当前角色上立即应用（尽管重力为全局）
-    reapplyEnabledFeatures()
+    -- 不自动改变重力（仅在 Enable 时生效）
 end
 
 function M.Enable()
     if M.enabled then return end
+    -- 记录原始重力（仅首次启用时）
+    if not M.originalRecorded then
+        M.originalGravity = workspace.Gravity
+        M.originalRecorded = true
+    end
     M.enabled = true
-    -- 记录 originalGravity 第一次启用时也保证已记录
-    M.originalGravity = M.originalGravity or workspace.Gravity
     applyGravity(M.currentGravity)
 end
 
 function M.Disable()
     if not M.enabled then return end
     M.enabled = false
-    pcall(function() workspace.Gravity = M.originalGravity end)
+    -- 恢复为启用前记录的原始重力（如果有记录）
+    if M.originalRecorded and M.originalGravity ~= nil then
+        pcall(function() workspace.Gravity = M.originalGravity end)
+        -- 恢复后清除记录，这样下一次启用会重新记录“启用前”的值
+        M.originalGravity = nil
+        M.originalRecorded = false
+    end
 end
 
 function M.Toggle(state)

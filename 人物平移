@@ -38,7 +38,6 @@ end
 local function startTranslation()
     if M.tpWalking then return end
     M.tpWalking = true
-    -- ensure we have character reference
     if not M.character and player.Character then
         M.character = player.Character
     end
@@ -63,7 +62,8 @@ local function startTranslation()
             local dt = deltaTime or (tick() - lastTime)
             lastTime = tick()
 
-            local moveVector = dir * math.max(0, tonumber(M.translationSpeed) or 0) * dt
+            local speed = math.max(0, tonumber(M.translationSpeed) or 0)
+            local moveVector = dir * speed * dt
 
             if M.character.PrimaryPart then
                 local ok = pcall(function()
@@ -97,10 +97,9 @@ end
 
 local function onCharacterAdded(newChar)
     M.character = newChar
-    -- give time for humanoid/primarypart to exist
     task.spawn(function()
         wait(0.5)
-        if M.tpWalking then
+        if M.enabled and M.tpWalking then
             startTranslation()
         end
     end)
@@ -116,25 +115,17 @@ function M.Init()
     M.character = player.Character or nil
     M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
     table.insert(M.conns, M.charConn)
-    -- also listen to CharacterRemoving on the character itself if needed
-    if player.Character then
-        task.spawn(function()
-            -- attempt to hook CharacterRemoving if available
-            local ok, conn = pcall(function()
-                return player.Character:WaitForChild("Humanoid", 1)
-            end)
-            -- rely on CharacterAdded/next cycles to clean up
-        end)
+    -- If module was enabled previously, ensure translation starts
+    if M.enabled and M.tpWalking then
+        startTranslation()
     end
 end
 
 function M.Enable()
     if M.enabled then return end
     M.enabled = true
-    -- If translation was previously requested, start it now
-    if M.tpWalking then
-        startTranslation()
-    end
+    -- When enabling the module, also start translation so toggle from UI takes effect
+    startTranslation()
 end
 
 function M.Disable()
@@ -167,7 +158,6 @@ function M.IsEnabled()
     return M.enabled
 end
 
--- Expose control for starting/stopping translation independent of enabled state:
 function M.StartTranslation()
     startTranslation()
 end
@@ -176,7 +166,6 @@ function M.StopTranslation()
     stopTranslation()
 end
 
--- auto-init
 pcall(function() M.Init() end)
 
 return M

@@ -1,0 +1,182 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        SetSpeed = function() end,
+        GetSpeed = function() return 0 end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local M = {
+    enabled = false,
+    tpWalking = false,
+    translationSpeed = 50,
+    translationConnection = nil,
+    character = nil,
+    charConn = nil,
+    conns = {},
+}
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function getHumanoid(char)
+    if not char then return nil end
+    return char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+end
+
+local function startTranslation()
+    if M.tpWalking then return end
+    M.tpWalking = true
+    -- ensure we have character reference
+    if not M.character and player.Character then
+        M.character = player.Character
+    end
+
+    local lastTime = tick()
+
+    if M.translationConnection then
+        safeDisconnect(M.translationConnection)
+        M.translationConnection = nil
+    end
+
+    M.translationConnection = RunService.Heartbeat:Connect(function(deltaTime)
+        if not M.tpWalking then return end
+        if not M.character or not M.character.Parent then return end
+
+        local humanoid = getHumanoid(M.character)
+        if not humanoid then return end
+
+        local moveDir = humanoid.MoveDirection
+        if moveDir and moveDir.Magnitude > 0 then
+            local dir = moveDir.Unit
+            local dt = deltaTime or (tick() - lastTime)
+            lastTime = tick()
+
+            local moveVector = dir * math.max(0, tonumber(M.translationSpeed) or 0) * dt
+
+            if M.character.PrimaryPart then
+                local ok = pcall(function()
+                    M.character:TranslateBy(moveVector)
+                end)
+                if not ok then
+                    local root = M.character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        pcall(function() root.CFrame = root.CFrame + moveVector end)
+                    end
+                end
+            else
+                local root = M.character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function() root.CFrame = root.CFrame + moveVector end)
+                end
+            end
+        end
+    end)
+
+    table.insert(M.conns, M.translationConnection)
+end
+
+local function stopTranslation()
+    M.tpWalking = false
+    if M.translationConnection then
+        safeDisconnect(M.translationConnection)
+        M.translationConnection = nil
+    end
+end
+
+local function onCharacterAdded(newChar)
+    M.character = newChar
+    -- give time for humanoid/primarypart to exist
+    task.spawn(function()
+        wait(0.5)
+        if M.tpWalking then
+            startTranslation()
+        end
+    end)
+end
+
+local function onCharacterRemoving()
+    stopTranslation()
+    M.character = nil
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.character = player.Character or nil
+    M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
+    table.insert(M.conns, M.charConn)
+    -- also listen to CharacterRemoving on the character itself if needed
+    if player.Character then
+        task.spawn(function()
+            -- attempt to hook CharacterRemoving if available
+            local ok, conn = pcall(function()
+                return player.Character:WaitForChild("Humanoid", 1)
+            end)
+            -- rely on CharacterAdded/next cycles to clean up
+        end)
+    end
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    -- If translation was previously requested, start it now
+    if M.tpWalking then
+        startTranslation()
+    end
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    M.enabled = false
+    stopTranslation()
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.SetSpeed(n)
+    local num = tonumber(n)
+    if not num or num < 0 then return end
+    M.translationSpeed = num
+end
+
+function M.GetSpeed()
+    return M.translationSpeed
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+-- Expose control for starting/stopping translation independent of enabled state:
+function M.StartTranslation()
+    startTranslation()
+end
+
+function M.StopTranslation()
+    stopTranslation()
+end
+
+-- auto-init
+pcall(function() M.Init() end)
+
+return M

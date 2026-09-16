@@ -27,12 +27,12 @@ local M = {
     drawings = {},        -- [player] = { Text, Tracer, Box }
     characters = {},      -- [player] = character
     renderConn = nil,
-    saveLoop = nil,
+    saveTask = nil,
     uiInsetY = GuiService:GetGuiInset().Y,
     configFile = "fates-esp.json",
 }
 
--- Default settings (kept similar to original)
+-- Defaults (kept aligned with original script)
 local DefaultSettings = {
     Esp = {
         NamesEnabled = true,
@@ -44,8 +44,8 @@ local DefaultSettings = {
         TeamColors = true,
         Thickness = 1.5,
         TracerThickness = 1.6,
-        Transparency = 0.9,
-        TracerTrancparency = 0.7,
+        Transparency = .9,
+        TracerTrancparency = .7,
         Size = 16,
         RenderDistance = 9e9,
         Color = Color3.fromRGB(19, 130, 226),
@@ -77,7 +77,7 @@ local DefaultSettings = {
     Version = 1.2
 }
 
--- Utilities for config encode/decode (match original behavior for Color3/UDim2)
+-- Helpers for encoding/decoding Color3 and UDim2 to persist in JSON
 local function deepsearchset(tbl, ret, value)
     if type(tbl) ~= "table" then return tbl end
     local new = {}
@@ -132,6 +132,7 @@ local function EncodeConfig(Config)
     return EncodedConfig
 end
 
+-- Config load/save
 local function loadSettings()
     local ok, data = pcall(function() return readfile(M.configFile) end)
     if ok and data then
@@ -144,7 +145,6 @@ local function loadSettings()
             end
         end
     end
-    -- fallback: write default and use it
     M.settings = DefaultSettings
     pcall(function()
         writefile(M.configFile, HttpService:JSONEncode(EncodeConfig(DefaultSettings)))
@@ -158,7 +158,7 @@ local function saveSettings()
     end)
 end
 
--- Drawing helpers
+-- Drawing helpers (Drawing API)
 local function newText()
     local txt = Drawing.new("Text")
     txt.Color = M.settings.Esp.Color
@@ -192,7 +192,6 @@ local function newBox()
     return box
 end
 
--- Create/Destroy per-player drawings
 local function createDrawingsForPlayer(player)
     if M.drawings[player] then return end
     local t = {
@@ -212,9 +211,8 @@ local function destroyDrawingsForPlayer(player)
     M.drawings[player] = nil
 end
 
--- Player / Character handling
+-- Player/character tracking
 local function handlePlayer(player)
-    -- connect character added/removed
     M.characters[player] = player.Character
     player.CharacterAdded:Connect(function(char)
         M.characters[player] = char
@@ -241,30 +239,25 @@ local function cleanupAllPlayers()
     M.characters = {}
 end
 
--- Core render/update function (mirrors original behavior)
-local CurrentCamera = Workspace.CurrentCamera
+-- core update function (keeps behavior like original script)
 local function worldToViewport(pt)
-    if not CurrentCamera then CurrentCamera = Workspace.CurrentCamera end
-    return CurrentCamera:WorldToViewportPoint(pt)
+    local cam = Workspace.CurrentCamera
+    if not cam then return { X = 0, Y = 0 }, false end
+    return cam:WorldToViewportPoint(pt)
 end
 
 local function getTeam(player)
     return player.Team
 end
 
-local function inRenderDistance(pos, localRoot, maxDist)
-    if not localRoot then return true end
-    local dist = (pos - localRoot.Position).Magnitude
-    return dist <= maxDist
-end
-
 local function updateFrame()
     if not M.enabled then return end
     local inset = M.uiInsetY
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
     local LocalRoot = M.characters[LocalPlayer] and M.characters[LocalPlayer]:FindFirstChild("HumanoidRootPart")
     for player, char in pairs(M.characters) do
         if player == LocalPlayer then
-            -- skip local player visuals
             local pd = M.drawings[player]
             if pd then
                 pd.Text.Visible = false
@@ -288,8 +281,8 @@ local function updateFrame()
 
         local aimPart = char:FindFirstChild(M.settings.Esp.TracerTo) or root
         local worldPos = aimPart.Position
-        local tuple, onScreen = worldToViewport(worldPos)
-        local screenPos = Vector2.new(tuple.X, tuple.Y)
+        local tupleX, onScreen = worldToViewport(worldPos)
+        local screenPos = Vector2.new(tupleX.X, tupleX.Y)
         local dist = LocalRoot and (worldPos - LocalRoot.Position).Magnitude or math.huge
 
         local inDistance = dist <= (M.settings.Esp.RenderDistance or 9e9)
@@ -300,7 +293,6 @@ local function updateFrame()
         end
 
         if inDistance and onScreen and not blacklisted then
-            -- text
             local nameText = ""
             if M.settings.Esp.NamesEnabled then
                 nameText = nameText .. player.Name
@@ -320,22 +312,19 @@ local function updateFrame()
             pd.Text.Transparency = M.settings.Esp.Transparency
             pd.Text.OutlineColor = M.settings.Esp.OutlineColor or Color3.new(0,0,0)
 
-            -- tracer
             pd.Tracer.Thickness = M.settings.Esp.TracerThickness
             pd.Tracer.Transparency = M.settings.Esp.TracerTrancparency
-            pd.Tracer.From = Vector2.new(CurrentCamera.ViewportSize.X / 2, CurrentCamera.ViewportSize.Y)
+            pd.Tracer.From = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y)
             pd.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
 
-            -- box (approx using parts bounds)
             if M.settings.Esp.BoxEsp then
                 local parts = {}
                 for _, part in ipairs(char:GetChildren()) do
                     if part:IsA("BasePart") then
-                        local vp = worldToViewport(part.Position)
+                        local vp = cam:WorldToViewportPoint(part.Position)
                         parts[part] = Vector2.new(vp.X, vp.Y)
                     end
                 end
-                -- pick extremes
                 local top, bottom, left, right
                 local closest, distTemp = nil, math.huge
                 for _, pos in pairs(parts) do
@@ -345,7 +334,7 @@ local function updateFrame()
                 top = closest
                 closest, distTemp = nil, math.huge
                 for _, pos in pairs(parts) do
-                    local mag = (pos - Vector2.new(screenPos.X, CurrentCamera.ViewportSize.Y)).Magnitude
+                    local mag = (pos - Vector2.new(screenPos.X, cam.ViewportSize.Y)).Magnitude
                     if mag <= distTemp then closest, distTemp = pos, mag end
                 end
                 bottom = closest
@@ -357,10 +346,11 @@ local function updateFrame()
                 left = closest
                 closest, distTemp = nil, math.huge
                 for _, pos in pairs(parts) do
-                    local mag = (pos - Vector2.new(CurrentCamera.ViewportSize.X, screenPos.Y)).Magnitude
+                    local mag = (pos - Vector2.new(cam.ViewportSize.X, screenPos.Y)).Magnitude
                     if mag <= distTemp then closest, distTemp = pos, mag end
                 end
                 right = closest
+
                 if top and bottom and left and right then
                     pd.Box.PointA = Vector2.new(right.X, top.Y)
                     pd.Box.PointB = Vector2.new(left.X, top.Y)
@@ -373,7 +363,6 @@ local function updateFrame()
                 end
             end
 
-            -- team colors
             if M.settings.Esp.TeamColors and team then
                 local teamColor = team.TeamColor.Color
                 pd.Text.Color = teamColor
@@ -401,10 +390,8 @@ function M.Init()
     if M.initialized then return end
     M.initialized = true
 
-    -- load settings
     loadSettings()
 
-    -- prepare players
     for _, p in ipairs(Players:GetPlayers()) do
         handlePlayer(p)
     end
@@ -420,13 +407,11 @@ function M.Init()
         end
     end)
 
-    -- render loop (always running but only updates when enabled)
     M.renderConn = RunService.RenderStepped:Connect(function()
         updateFrame()
     end)
 
-    -- periodic save loop (every 5 seconds)
-    M.saveLoop = task.spawn(function()
+    M.saveTask = task.spawn(function()
         while true do
             task.wait(5)
             saveSettings()
@@ -438,7 +423,6 @@ function M.Enable()
     if not M.initialized then M.Init() end
     if M.enabled then return end
     M.enabled = true
-    -- ensure drawings exist for all players
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then createDrawingsForPlayer(p) end
     end
@@ -447,7 +431,6 @@ end
 function M.Disable()
     if not M.enabled then return end
     M.enabled = false
-    -- hide but keep drawings (so re-enable is fast)
     for p, d in pairs(M.drawings) do
         if d.Text then d.Text.Visible = false end
         if d.Tracer then d.Tracer.Visible = false end
@@ -475,11 +458,10 @@ end
 
 function M.SetSettings(newSettings)
     if type(newSettings) ~= "table" then return end
-    -- shallow merge
     for k, v in pairs(newSettings) do
         M.settings[k] = v
     end
-    -- apply color/size related changes to existing drawings
+    -- apply visual changes to existing drawings
     for _, d in pairs(M.drawings) do
         pcall(function()
             if d.Text then
@@ -505,10 +487,9 @@ function M.Cleanup()
         pcall(function() M.renderConn:Disconnect() end)
         M.renderConn = nil
     end
-    if M.saveLoop then
-        -- saveLoop is an autonomous task; we won't forcibly close it but save once
+    if M.saveTask then
         saveSettings()
-        M.saveLoop = nil
+        M.saveTask = nil
     end
     for p, _ in pairs(M.drawings) do
         destroyDrawingsForPlayer(p)
@@ -519,7 +500,7 @@ function M.Cleanup()
     M.enabled = false
 end
 
--- auto-init but don't enable visuals until user calls Enable
+-- auto-init but do not enable visuals until user calls Enable
 pcall(function() M.Init() end)
 
 return M

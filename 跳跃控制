@@ -1,0 +1,184 @@
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        SetJumpPower = function() end,
+        GetJumpPower = function() return 0 end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local M = {
+    enabled = false,
+    conns = {},
+    charConn = nil,
+    removingConn = nil,
+    humanoid = nil,
+    -- 默认值
+    currentJumpValue = 7.2,
+}
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function getHumanoid(char)
+    if not char then return nil end
+    return char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+end
+
+local function storeOriginalValues(humanoid)
+    if not humanoid then return end
+    -- JumpHeight
+    pcall(function()
+        if humanoid:GetAttribute("__originalJumpHeight") == nil then
+            humanoid:SetAttribute("__originalJumpHeight", humanoid.JumpHeight)
+        end
+    end)
+    -- JumpPower
+    pcall(function()
+        if humanoid:GetAttribute("__originalJumpPower") == nil then
+            local ok, val = pcall(function() return humanoid.JumpPower end)
+            if ok then humanoid:SetAttribute("__originalJumpPower", val) end
+        end
+    end)
+    -- UseJumpPower
+    pcall(function()
+        if humanoid:GetAttribute("__originalUseJumpPower") == nil then
+            local ok, val = pcall(function() return humanoid.UseJumpPower end)
+            if ok then humanoid:SetAttribute("__originalUseJumpPower", val) end
+        end
+    end)
+end
+
+local function applyJumpHeightToCharacter(char, value)
+    local humanoid = getHumanoid(char)
+    if not humanoid then return false end
+
+    storeOriginalValues(humanoid)
+
+    local n = tonumber(value) or 0
+    local ok1 = pcall(function() humanoid.JumpHeight = n end)
+    local ok2 = pcall(function() humanoid.JumpPower = n end)
+    return ok1 or ok2
+end
+
+local function restoreOriginalJumpHeight(char)
+    local humanoid = getHumanoid(char)
+    if not humanoid then return end
+
+    pcall(function()
+        local ok, origH = pcall(function() return humanoid:GetAttribute("__originalJumpHeight") end)
+        if ok and origH ~= nil then
+            humanoid.JumpHeight = origH
+            humanoid:SetAttribute("__originalJumpHeight", nil)
+        end
+    end)
+
+    pcall(function()
+        local ok, origP = pcall(function() return humanoid:GetAttribute("__originalJumpPower") end)
+        if ok and origP ~= nil then
+            humanoid.JumpPower = origP
+            humanoid:SetAttribute("__originalJumpPower", nil)
+        end
+    end)
+
+    pcall(function()
+        local ok, origUse = pcall(function() return humanoid:GetAttribute("__originalUseJumpPower") end)
+        if ok and origUse ~= nil then
+            humanoid.UseJumpPower = origUse
+            humanoid:SetAttribute("__originalUseJumpPower", nil)
+        end
+    end)
+end
+
+local function onCharacterAdded(char)
+    M.humanoid = nil
+    local ok, hum = pcall(function() return char:WaitForChild("Humanoid", 5) end)
+    if ok and hum then
+        M.humanoid = hum
+        -- store original values if not present
+        storeOriginalValues(hum)
+        if M.enabled then
+            applyJumpHeightToCharacter(char, M.currentJumpValue)
+        end
+    end
+end
+
+local function onCharacterRemoving()
+    if M.humanoid then
+        pcall(function()
+            if M.humanoid.Parent then
+                -- restore original values to the humanoid being removed (if attributes exist)
+                restoreOriginalJumpHeight(M.humanoid.Parent)
+            end
+        end)
+    end
+    M.humanoid = nil
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.charConn = player.CharacterAdded:Connect(function(c) onCharacterAdded(c) end)
+    M.removingConn = player.CharacterRemoving:Connect(function() onCharacterRemoving() end)
+    table.insert(M.conns, M.charConn)
+    table.insert(M.conns, M.removingConn)
+    if player.Character then
+        -- ensure we initialize with current character
+        task.spawn(function() onCharacterAdded(player.Character) end)
+    end
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    if player.Character then
+        applyJumpHeightToCharacter(player.Character, M.currentJumpValue)
+    end
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    M.enabled = false
+    if player.Character then
+        restoreOriginalJumpHeight(player.Character)
+    end
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.SetJumpPower(n)
+    local num = tonumber(n)
+    if not num then return end
+    M.currentJumpValue = num
+    if M.enabled and player.Character then
+        applyJumpHeightToCharacter(player.Character, num)
+    end
+end
+
+function M.GetJumpPower()
+    return M.currentJumpValue
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+pcall(function() M.Init() end)
+
+return M

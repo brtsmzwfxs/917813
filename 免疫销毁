@@ -1,0 +1,178 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        SetRadius = function() end,
+        GetRadius = function() return 0 end,
+        SetInterval = function() end,
+        GetInterval = function() return 0 end,
+        IsEnabled = function() return false end,
+        Cleanup = function() end,
+    }
+end
+
+local M = {
+    enabled = false,
+    scanRadius = 10,
+    scanInterval = 0.12,
+    immunityThreadRunning = false,
+    immunityThread = nil,
+    originalCanTouch = {}, -- [part] = bool
+    character = player.Character or nil,
+    charConn = nil,
+    conns = {},
+}
+
+local function safeDisconnect(conn)
+    if conn and typeof(conn) == "RBXScriptConnection" then
+        pcall(function() conn:Disconnect() end)
+    end
+end
+
+local function saveOriginalCanTouch(part)
+    if not part then return end
+    if M.originalCanTouch[part] == nil then
+        local ok, val = pcall(function() return part.CanTouch end)
+        M.originalCanTouch[part] = ok and val or true
+    end
+end
+
+local function restoreAllOriginals()
+    for part, val in pairs(M.originalCanTouch) do
+        if part and part.Parent then
+            pcall(function() part.CanTouch = val end)
+        end
+        M.originalCanTouch[part] = nil
+    end
+    M.originalCanTouch = {}
+end
+
+local function scanAndApplyImmunity()
+    if not M.character or not M.character.Parent then return end
+    local root = M.character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(root.Position, M.scanRadius)
+    end)
+    if not ok or not parts then return end
+
+    for _, part in ipairs(parts) do
+        if part and part:IsA("BasePart") then
+            saveOriginalCanTouch(part)
+            pcall(function() part.CanTouch = false end)
+        end
+    end
+end
+
+local function immunityLoop()
+    if M.immunityThreadRunning then return end
+    M.immunityThreadRunning = true
+    M.immunityThread = task.spawn(function()
+        while M.enabled do
+            scanAndApplyImmunity()
+            task.wait(M.scanInterval)
+        end
+        M.immunityThreadRunning = false
+    end)
+end
+
+local function startImmunity()
+    if M.enabled then return end
+    M.enabled = true
+    immunityLoop()
+end
+
+local function stopImmunity()
+    if not M.enabled then return end
+    M.enabled = false
+    -- give a moment for loop to exit
+    task.wait(0.02)
+    restoreAllOriginals()
+end
+
+local function onCharacterAdded(newChar)
+    M.character = newChar
+    -- small delay to allow HumanoidRootPart to exist
+    task.spawn(function()
+        task.wait(0.5)
+        if M.enabled then
+            immunityLoop()
+        end
+    end)
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.character = player.Character or nil
+    M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
+    table.insert(M.conns, M.charConn)
+    -- Ensure initial behavior if enabled before Init
+    if M.enabled then
+        immunityLoop()
+    end
+end
+
+function M.Enable()
+    startImmunity()
+end
+
+function M.Disable()
+    stopImmunity()
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.SetRadius(n)
+    local num = tonumber(n)
+    if not num or num < 0 then return end
+    M.scanRadius = num
+end
+
+function M.GetRadius()
+    return M.scanRadius
+end
+
+function M.SetInterval(n)
+    local num = tonumber(n)
+    if not num or num <= 0 then return end
+    M.scanInterval = num
+end
+
+function M.GetInterval()
+    return M.scanInterval
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+function M.Cleanup()
+    -- disable and restore
+    stopImmunity()
+    -- disconnect connections
+    for _, c in ipairs(M.conns) do
+        safeDisconnect(c)
+    end
+    M.conns = {}
+    M.charConn = nil
+    M.character = nil
+end
+
+pcall(function() M.Init() end)
+
+return M

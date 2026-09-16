@@ -1,0 +1,249 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local M = {
+    enabled = false,
+    conns = {},
+    charConn = nil,
+    removingConn = nil,
+    enforceConnection = nil,
+    humanoid = nil,
+    originalWalkSpeed = 16,
+    currentSpeed = 16,
+    gui = nil,
+}
+
+local player = Players.LocalPlayer
+if not player then
+    return {
+        Init = function() end,
+        Enable = function() end,
+        Disable = function() end,
+        Toggle = function() end,
+        SetSpeed = function() end,
+        IsEnabled = function() return false end,
+    }
+end
+
+local function safeDisconnect(c)
+    if c and typeof(c) == "RBXScriptConnection" then
+        pcall(function() c:Disconnect() end)
+    end
+end
+
+local function applySpeed()
+    if M.humanoid and M.enabled then
+        pcall(function() M.humanoid.WalkSpeed = M.currentSpeed end)
+    end
+end
+
+local function restoreSpeed()
+    if M.humanoid then
+        pcall(function() M.humanoid.WalkSpeed = M.originalWalkSpeed or 16 end)
+    end
+end
+
+local function startEnforce()
+    if M.enforceConnection then safeDisconnect(M.enforceConnection) end
+    M.enforceConnection = RunService.RenderStepped:Connect(function()
+        if M.enabled and M.humanoid then
+            if M.humanoid.WalkSpeed ~= M.currentSpeed then
+                pcall(function() M.humanoid.WalkSpeed = M.currentSpeed end)
+            end
+        end
+    end)
+    table.insert(M.conns, M.enforceConnection)
+end
+
+local function stopEnforce()
+    safeDisconnect(M.enforceConnection)
+    M.enforceConnection = nil
+end
+
+local function setToggleVisual(enabled)
+    if not M.gui then return end
+    local toggleBtn = M.gui.ToggleBtn
+    if not toggleBtn then return end
+    if enabled then
+        toggleBtn.Text = "已启用"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(0,170,0)
+    else
+        toggleBtn.Text = "启用"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100,100,100)
+    end
+end
+
+local function onCharacterAdded(char)
+    stopEnforce()
+    M.humanoid = nil
+    local ok, hum = pcall(function() return char:WaitForChild("Humanoid", 5) end)
+    if ok and hum then
+        M.humanoid = hum
+        M.originalWalkSpeed = hum.WalkSpeed or M.originalWalkSpeed
+        if M.enabled then
+            applySpeed()
+            startEnforce()
+        end
+    end
+end
+
+local function onCharacterRemoving()
+    stopEnforce()
+    if M.humanoid then
+        pcall(function()
+            if M.humanoid.Parent then
+                M.humanoid.WalkSpeed = M.originalWalkSpeed
+            end
+        end)
+    end
+    M.humanoid = nil
+end
+
+function M.CreateGUI()
+    if M.gui then return end
+    local playerGui = player:WaitForChild("PlayerGui")
+    local existing = playerGui:FindFirstChild("SpeedControlGUI")
+    if existing then
+        local frame = existing:FindFirstChildWhichIsA("Frame")
+        M.gui = {
+            ScreenGui = existing,
+            Frame = frame,
+            SpeedBox = frame and frame:FindFirstChild("SpeedBox"),
+            ToggleBtn = frame and frame:FindFirstChild("ToggleBtn"),
+        }
+        if M.gui.ToggleBtn then
+            M.gui.ToggleBtn.MouseButton1Click:Connect(function() M.Toggle() end)
+        end
+        if M.gui.SpeedBox then
+            M.gui.SpeedBox:GetPropertyChangedSignal("Text"):Connect(function()
+                local num = tonumber(M.gui.SpeedBox.Text)
+                if num and num > 0 then
+                    M.currentSpeed = num
+                    if M.enabled then applySpeed() end
+                end
+            end)
+        end
+        return
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "SpeedControlGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 260, 0, 80)
+    frame.Position = UDim2.new(0, 10, 0, 10)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    frame.BackgroundTransparency = 0.05
+    frame.Parent = screenGui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0, 200, 0, 24)
+    title.Position = UDim2.new(0, 8, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "速度控制"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 18
+    title.Parent = frame
+
+    local speedBox = Instance.new("TextBox")
+    speedBox.Name = "SpeedBox"
+    speedBox.Size = UDim2.new(0, 120, 0, 30)
+    speedBox.Position = UDim2.new(0, 8, 0, 34)
+    speedBox.Text = tostring(M.currentSpeed or 16)
+    speedBox.ClearTextOnFocus = false
+    speedBox.Parent = frame
+    speedBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    speedBox.TextColor3 = Color3.fromRGB(255,255,255)
+    speedBox.Font = Enum.Font.SourceSans
+    speedBox.TextSize = 18
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleBtn"
+    toggleBtn.Size = UDim2.new(0, 100, 0, 30)
+    toggleBtn.Position = UDim2.new(0, 140, 0, 34)
+    toggleBtn.Text = "启用"
+    toggleBtn.Parent = frame
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    toggleBtn.Font = Enum.Font.SourceSans
+    toggleBtn.TextSize = 16
+
+    M.gui = {
+        ScreenGui = screenGui,
+        Frame = frame,
+        SpeedBox = speedBox,
+        ToggleBtn = toggleBtn,
+    }
+
+    toggleBtn.MouseButton1Click:Connect(function() M.Toggle() end)
+    speedBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local num = tonumber(speedBox.Text)
+        if num and num > 0 then
+            M.currentSpeed = num
+            if M.enabled then applySpeed() end
+        end
+    end)
+end
+
+function M.Init()
+    if M.charConn then return end
+    M.CreateGUI()
+    M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
+    M.removingConn = player.CharacterRemoving:Connect(onCharacterRemoving)
+    table.insert(M.conns, M.charConn)
+    table.insert(M.conns, M.removingConn)
+    if player.Character then
+        task.spawn(function() onCharacterAdded(player.Character) end)
+    end
+end
+
+function M.Enable()
+    if M.enabled then return end
+    M.enabled = true
+    M.currentSpeed = tonumber((M.gui and M.gui.SpeedBox and M.gui.SpeedBox.Text) or M.currentSpeed) or M.currentSpeed
+    setToggleVisual(true)
+    if not M.humanoid and player.Character then onCharacterAdded(player.Character) end
+    applySpeed()
+    startEnforce()
+end
+
+function M.Disable()
+    if not M.enabled then return end
+    M.enabled = false
+    setToggleVisual(false)
+    stopEnforce()
+    restoreSpeed()
+end
+
+function M.Toggle(state)
+    if state == nil then
+        if M.enabled then M.Disable() else M.Enable() end
+    elseif state then
+        M.Enable()
+    else
+        M.Disable()
+    end
+end
+
+function M.SetSpeed(n)
+    n = tonumber(n)
+    if not n or n <= 0 then return end
+    M.currentSpeed = n
+    if M.gui and M.gui.SpeedBox then
+        pcall(function() M.gui.SpeedBox.Text = tostring(n) end)
+    end
+    if M.enabled then
+        applySpeed()
+    end
+end
+
+function M.IsEnabled()
+    return M.enabled
+end
+
+pcall(function() M.Init() end)
+
+return M

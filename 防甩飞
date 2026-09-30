@@ -5,10 +5,10 @@ local localPlayer = Players.LocalPlayer
 
 local M = {}
 
-local CHECK_INTERVAL = 0.12
 local running = false
 local connections = {}
 local accumulator = 0
+local CHECK_INTERVAL = 0.12
 local originalCollide = {}
 
 local function applyNoCollide(model)

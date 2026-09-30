@@ -1,22 +1,18 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local CollectionService = game:GetService("CollectionService")
-
-local localPlayer = Players.LocalPlayer
-
-local M = {}
-
 local NoCollide = {}
 
 local NC_CHECK_INTERVAL = 0.12
 local nc_running = false
 local nc_connections = {}
 local nc_accumulator = 0
+local nc_originalCollide = {}
 
-local function nc_applyNoCollide(model)
+local function nc_applyNoCollide(model, state)
     if not model then return end
     for _, obj in ipairs(model:GetDescendants()) do
         if obj:IsA("BasePart") then
+            if state.originalCollide[obj] == nil then
+                state.originalCollide[obj] = obj.CanCollide
+            end
             pcall(function() obj.CanCollide = false end)
         end
     end
@@ -24,12 +20,25 @@ end
 
 local function nc_bindModel(model)
     if not model then return end
-    nc_applyNoCollide(model)
-    table.insert(nc_connections, model.DescendantAdded:Connect(function(desc)
-        if desc and desc:IsA("BasePart") then
-            pcall(function() desc.CanCollide = false end)
-        end
-    end))
+    local state = nc_originalCollide[model]
+    if not state then
+        state = { originalCollide = {}, conn = nil }
+        nc_originalCollide[model] = state
+    end
+
+    nc_applyNoCollide(model, state)
+
+    if not state.conn then
+        state.conn = model.DescendantAdded:Connect(function(desc)
+            if desc and desc:IsA("BasePart") then
+                if state.originalCollide[desc] == nil then
+                    state.originalCollide[desc] = desc.CanCollide
+                end
+                pcall(function() desc.CanCollide = false end)
+            end
+        end)
+        table.insert(nc_connections, state.conn)
+    end
 end
 
 local function nc_bindPlayer(player)
@@ -67,283 +76,23 @@ end
 function NoCollide.stop()
     if not nc_running then return end
     nc_running = false
+
     for _, c in ipairs(nc_connections) do
         pcall(function() c:Disconnect() end)
     end
     nc_connections = {}
     nc_accumulator = 0
+
+    for model, state in pairs(nc_originalCollide) do
+        for part, orig in pairs(state.originalCollide or {}) do
+            if part and part.Parent then
+                pcall(function() part.CanCollide = orig end)
+            end
+        end
+    end
+    nc_originalCollide = {}
 end
 
 function NoCollide.isRunning() return nc_running end
 
 M.NoCollide = NoCollide
-
-local Marker = {}
-
-local SCAN_INTERVAL = 0.12
-local LINEAR_THRESHOLD = 120
-local ANGULAR_THRESHOLD_DEG = 720
-local POSITION_DELTA_THRESHOLD = 20
-local PASS_DURATION = 2.5
-local MAX_MARK_DURATION = 5.0
-local TRANSPARENCY_VALUE = 0.5
-local MONITOR_TAG = "Monitor"
-
-local SAFE_CONTINUOUS = 0.6
-local SAFE_LINEAR_RATIO = 0.6
-local SAFE_ANGULAR_RATIO = 0.6
-
-local ANGULAR_THRESHOLD_RAD = math.rad(ANGULAR_THRESHOLD_DEG)
-
-local marker_tracked = {}
-local marker_running = false
-local marker_conn = nil
-
-local function getRootPart(model)
-    if not model then return nil end
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    if hrp and hrp:IsA("BasePart") then return hrp end
-    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then return model.PrimaryPart end
-    return nil
-end
-
-local function onDescendantAdded(state, descendant)
-    if not descendant or not descendant:IsA("BasePart") then return end
-    if state.originalTransparency[descendant] == nil then
-        state.originalTransparency[descendant] = descendant.Transparency
-    end
-    pcall(function() descendant.Transparency = TRANSPARENCY_VALUE end)
-end
-
-local function enableSemiTransparent(model, state)
-    if not model then return end
-    state.originalTransparency = state.originalTransparency or {}
-
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if state.originalTransparency[obj] == nil then
-                state.originalTransparency[obj] = obj.Transparency
-            end
-            pcall(function() obj.Transparency = TRANSPARENCY_VALUE end)
-        end
-    end
-
-    if not state.descendantConn then
-        state.descendantConn = model.DescendantAdded:Connect(function(desc)
-            onDescendantAdded(state, desc)
-        end)
-    end
-end
-
-local function disableSemiTransparent(model, state)
-    if not state then return end
-
-    for part, origTrans in pairs(state.originalTransparency or {}) do
-        if part and part.Parent then
-            pcall(function() part.Transparency = origTrans end)
-        end
-    end
-
-    if model and model.Parent then
-        for _, obj in ipairs(model:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                if state.originalTransparency[obj] == nil then
-                    pcall(function() obj.Transparency = 0 end)
-                end
-            end
-        end
-    end
-
-    if state.descendantConn then
-        pcall(function() state.descendantConn:Disconnect() end)
-        state.descendantConn = nil
-    end
-    state.originalTransparency = nil
-    state.semiUntil = nil
-    state.forceUntil = nil
-    state.lastSafeStart = nil
-end
-
-local function triggerSemiTransparent(model)
-    if not model then return end
-    local state = marker_tracked[model]
-    local now = tick()
-
-    if not state then
-        state = {
-            lastPos = nil,
-            lastCheck = nil,
-            lastSafeStart = nil,
-            originalTransparency = {},
-            descendantConn = nil,
-            semiUntil = 0,
-            forceUntil = 0,
-        }
-        marker_tracked[model] = state
-    end
-
-    if not state.originalTransparency or next(state.originalTransparency) == nil then
-        enableSemiTransparent(model, state)
-    end
-
-    state.semiUntil = now + PASS_DURATION
-    if not state.forceUntil or state.forceUntil < now then
-        state.forceUntil = now + MAX_MARK_DURATION
-    end
-end
-
-local function isModelSafe(root)
-    if not root then return true end
-    local lin = root.AssemblyLinearVelocity or Vector3.new(0,0,0)
-    local ang = root.AssemblyAngularVelocity or Vector3.new(0,0,0)
-    return lin.Magnitude <= (LINEAR_THRESHOLD * SAFE_LINEAR_RATIO)
-       and ang.Magnitude <= (ANGULAR_THRESHOLD_RAD * SAFE_ANGULAR_RATIO)
-end
-
-local function checkModel(model)
-    if not model or model == localPlayer.Character then return end
-
-    local root = getRootPart(model)
-    if not root then return end
-
-    local state = marker_tracked[model]
-    local now = tick()
-
-    local lin = root.AssemblyLinearVelocity or Vector3.new(0,0,0)
-    local ang = root.AssemblyAngularVelocity or Vector3.new(0,0,0)
-    local pos = root.Position
-
-    if state then
-        local expired = state.semiUntil and now >= state.semiUntil
-        local forceExpired = state.forceUntil and now >= state.forceUntil
-
-        if forceExpired then
-            disableSemiTransparent(model, state)
-            marker_tracked[model] = nil
-            state = nil
-        elseif expired then
-            if isModelSafe(root) then
-                disableSemiTransparent(model, state)
-                marker_tracked[model] = nil
-                state = nil
-            else
-                state.semiUntil = now + PASS_DURATION
-                state.lastPos = pos
-                state.lastCheck = now
-            end
-        end
-    end
-
-    if not state then return end
-
-    if state.lastPos and state.lastCheck then
-        local delta = (pos - state.lastPos).Magnitude
-        if delta >= POSITION_DELTA_THRESHOLD then
-            triggerSemiTransparent(model)
-            local s = marker_tracked[model]
-            if s then s.lastPos = pos; s.lastCheck = now end
-            return
-        end
-    end
-
-    if lin.Magnitude >= LINEAR_THRESHOLD or ang.Magnitude >= ANGULAR_THRESHOLD_RAD then
-        triggerSemiTransparent(model)
-        local s = marker_tracked[model]
-        if s then s.lastPos = pos; s.lastCheck = now end
-        return
-    end
-
-    if isModelSafe(root) then
-        if not state.lastSafeStart then state.lastSafeStart = now end
-        if now - state.lastSafeStart >= SAFE_CONTINUOUS then
-            if state.originalTransparency or state.semiUntil then
-                disableSemiTransparent(model, state)
-                marker_tracked[model] = nil
-                return
-            end
-        end
-    else
-        state.lastSafeStart = nil
-    end
-
-    state.lastPos = pos
-    state.lastCheck = now
-end
-
-local function scanOtherPlayers()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer then
-            local char = player.Character
-            if char then checkModel(char) end
-        end
-    end
-end
-
-local function scanTaggedModels()
-    for _, model in ipairs(CollectionService:GetTagged(MONITOR_TAG)) do
-        if model and model ~= localPlayer.Character then
-            checkModel(model)
-        end
-    end
-end
-
-function Marker.start()
-    if marker_running then return end
-    marker_running = true
-
-    local accumulator = 0
-    marker_conn = RunService.Heartbeat:Connect(function(dt)
-        accumulator = accumulator + dt
-        if accumulator < SCAN_INTERVAL then return end
-        accumulator = 0
-
-        scanOtherPlayers()
-        scanTaggedModels()
-
-        local now = tick()
-        for model, state in pairs(marker_tracked) do
-            if not model or not model.Parent then
-                disableSemiTransparent(model, state)
-                marker_tracked[model] = nil
-            elseif state.forceUntil and now >= state.forceUntil then
-                disableSemiTransparent(model, state)
-                marker_tracked[model] = nil
-            end
-        end
-    end)
-end
-
-function Marker.stop()
-    if not marker_running then return end
-    marker_running = false
-    if marker_conn then
-        pcall(function() marker_conn:Disconnect() end)
-        marker_conn = nil
-    end
-    for model, state in pairs(marker_tracked) do
-        disableSemiTransparent(model, state)
-    end
-    marker_tracked = {}
-end
-
-function Marker.isRunning() return marker_running end
-
-M.Marker = Marker
-
-function M.start()
-    NoCollide.start()
-    Marker.start()
-end
-
-function M.stop()
-    NoCollide.stop()
-    Marker.stop()
-end
-
-function M.isRunning()
-    return NoCollide.isRunning() or Marker.isRunning()
-end
-
-M.start()
-
-return M

@@ -1,70 +1,68 @@
-local NoCollide = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
-local NC_CHECK_INTERVAL = 0.12
-local nc_running = false
-local nc_connections = {}
-local nc_accumulator = 0
-local nc_originalCollide = {}
+local localPlayer = Players.LocalPlayer
 
-local function nc_applyNoCollide(model, state)
+local M = {}
+
+local CHECK_INTERVAL = 0.12
+local running = false
+local connections = {}
+local accumulator = 0
+local originalCollide = {}
+
+local function applyNoCollide(model)
     if not model then return end
     for _, obj in ipairs(model:GetDescendants()) do
         if obj:IsA("BasePart") then
-            if state.originalCollide[obj] == nil then
-                state.originalCollide[obj] = obj.CanCollide
+            if originalCollide[obj] == nil then
+                originalCollide[obj] = obj.CanCollide
             end
             pcall(function() obj.CanCollide = false end)
         end
     end
 end
 
-local function nc_bindModel(model)
+local function bindModel(model)
     if not model then return end
-    local state = nc_originalCollide[model]
-    if not state then
-        state = { originalCollide = {}, conn = nil }
-        nc_originalCollide[model] = state
-    end
-
-    nc_applyNoCollide(model, state)
-
-    if not state.conn then
-        state.conn = model.DescendantAdded:Connect(function(desc)
-            if desc and desc:IsA("BasePart") then
-                if state.originalCollide[desc] == nil then
-                    state.originalCollide[desc] = desc.CanCollide
-                end
-                pcall(function() desc.CanCollide = false end)
+    applyNoCollide(model)
+    table.insert(connections, model.DescendantAdded:Connect(function(desc)
+        if desc and desc:IsA("BasePart") then
+            if originalCollide[desc] == nil then
+                originalCollide[desc] = desc.CanCollide
             end
-        end)
-        table.insert(nc_connections, state.conn)
-    end
-end
-
-local function nc_bindPlayer(player)
-    if player == localPlayer then return end
-    table.insert(nc_connections, player.CharacterAdded:Connect(function(char)
-        if char then task.defer(function() nc_bindModel(char) end) end
+            pcall(function() desc.CanCollide = false end)
+        end
     end))
-    if player.Character then nc_bindModel(player.Character) end
 end
 
-function NoCollide.start(interval)
-    if nc_running then return end
-    nc_running = true
-    NC_CHECK_INTERVAL = interval or NC_CHECK_INTERVAL
+local function bindPlayer(player)
+    if player == localPlayer then return end
+    table.insert(connections, player.CharacterAdded:Connect(function(char)
+        if char then task.defer(function() bindModel(char) end) end
+    end))
+    if player.Character then bindModel(player.Character) end
+end
 
-    for _, player in ipairs(Players:GetPlayers()) do nc_bindPlayer(player) end
-    table.insert(nc_connections, Players.PlayerAdded:Connect(nc_bindPlayer))
+function M.start(interval)
+    if running then return end
+    running = true
+    CHECK_INTERVAL = interval or CHECK_INTERVAL
 
-    table.insert(nc_connections, RunService.Heartbeat:Connect(function(dt)
-        nc_accumulator = nc_accumulator + dt
-        if nc_accumulator < NC_CHECK_INTERVAL then return end
-        nc_accumulator = 0
+    for _, player in ipairs(Players:GetPlayers()) do bindPlayer(player) end
+    table.insert(connections, Players.PlayerAdded:Connect(bindPlayer))
+
+    table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+        accumulator = accumulator + dt
+        if accumulator < CHECK_INTERVAL then return end
+        accumulator = 0
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= localPlayer and player.Character then
                 for _, obj in ipairs(player.Character:GetDescendants()) do
                     if obj:IsA("BasePart") and obj.CanCollide ~= false then
+                        if originalCollide[obj] == nil then
+                            originalCollide[obj] = obj.CanCollide
+                        end
                         pcall(function() obj.CanCollide = false end)
                     end
                 end
@@ -73,26 +71,26 @@ function NoCollide.start(interval)
     end))
 end
 
-function NoCollide.stop()
-    if not nc_running then return end
-    nc_running = false
+function M.stop()
+    if not running then return end
+    running = false
 
-    for _, c in ipairs(nc_connections) do
+    for _, c in ipairs(connections) do
         pcall(function() c:Disconnect() end)
     end
-    nc_connections = {}
-    nc_accumulator = 0
+    connections = {}
+    accumulator = 0
 
-    for model, state in pairs(nc_originalCollide) do
-        for part, orig in pairs(state.originalCollide or {}) do
-            if part and part.Parent then
-                pcall(function() part.CanCollide = orig end)
-            end
+    for part, orig in pairs(originalCollide) do
+        if part and part.Parent then
+            pcall(function() part.CanCollide = orig end)
         end
     end
-    nc_originalCollide = {}
+    originalCollide = {}
 end
 
-function NoCollide.isRunning() return nc_running end
+function M.isRunning()
+    return running
+end
 
-M.NoCollide = NoCollide
+return M

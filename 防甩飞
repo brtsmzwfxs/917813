@@ -1,0 +1,231 @@
+-- Remote OtherPlayersNoCollide (单文件，可通过 loadstring(game:HttpGet(url))() 加载)
+-- 自动为当前客户端禁止“其他所有玩家”角色的 CanCollide（默认不恢复）
+-- 返回模块表 OtherPlayersNoCollide（并在客户端自动创建并 Start 一个实例）
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local OtherPlayersNoCollide = {}
+OtherPlayersNoCollide.__index = OtherPlayersNoCollide
+
+local DEFAULTS = {
+    CHECK_INTERVAL = 0.12,
+    MONITOR_OTHERS = true,         -- 是否监视除本地玩家之外的玩家
+    RESTORE_ON_STOP = false,       -- Stop 时是否尝试恢复原始 CanCollide（默认 false，与原脚本行为一致）
+}
+
+local function newState()
+    return {
+        characterConn = nil,
+        descendantConn = nil,
+        originalCanCollide = nil, -- optional table part->bool when RESTORE_ON_STOP
+    }
+end
+
+function OtherPlayersNoCollide.new(localPlayer, config)
+    assert(localPlayer and localPlayer:IsA and localPlayer:IsA("Player"), "localPlayer (Player) required")
+    local self = setmetatable({}, OtherPlayersNoCollide)
+    self.localPlayer = localPlayer
+    self.config = {}
+    for k,v in pairs(DEFAULTS) do self.config[k] = v end
+    if config and type(config) == "table" then
+        for k,v in pairs(config) do self.config[k] = v end
+    end
+
+    self._acc = 0
+    self._conn = nil
+    self._playerAddedConn = nil
+    self._playerRemovingConn = nil
+    self.boundPlayers = {} -- [player] = state
+
+    return self
+end
+
+function OtherPlayersNoCollide:SetConfig(cfg)
+    if not cfg or type(cfg) ~= "table" then return end
+    for k,v in pairs(cfg) do self.config[k] = v end
+end
+
+function OtherPlayersNoCollide:_applyNoCollideToCharacter(state, character)
+    if not character then return end
+    state.originalCanCollide = state.originalCanCollide or {}
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            if self.config.RESTORE_ON_STOP and state.originalCanCollide[obj] == nil then
+                state.originalCanCollide[obj] = obj.CanCollide
+            end
+            pcall(function() obj.CanCollide = false end)
+        end
+    end
+
+    -- 监听新增部件，保证后续部件也被设置
+    if state.descendantConn then
+        pcall(function() state.descendantConn:Disconnect() end)
+        state.descendantConn = nil
+    end
+    state.descendantConn = character.DescendantAdded:Connect(function(desc)
+        if desc and desc:IsA("BasePart") then
+            if self.config.RESTORE_ON_STOP and state.originalCanCollide[desc] == nil then
+                state.originalCanCollide[desc] = desc.CanCollide
+            end
+            pcall(function() desc.CanCollide = false end)
+        end
+    end)
+end
+
+function OtherPlayersNoCollide:_bindPlayer(player)
+    if not player or player == self.localPlayer or (not self.config.MONITOR_OTHERS) then return end
+    if self.boundPlayers[player] then return end
+    local state = newState()
+    self.boundPlayers[player] = state
+
+    -- CharacterAdded
+    state.characterConn = player.CharacterAdded:Connect(function(char)
+        if char then
+            task.defer(function()
+                self:_applyNoCollideToCharacter(state, char)
+            end)
+        end
+    end)
+
+    -- If already has character, apply immediately
+    if player.Character then
+        task.defer(function()
+            self:_applyNoCollideToCharacter(state, player.Character)
+        end)
+    end
+end
+
+function OtherPlayersNoCollide:_unbindPlayer(player)
+    local state = self.boundPlayers[player]
+    if not state then return end
+    if state.characterConn then
+        pcall(function() state.characterConn:Disconnect() end)
+        state.characterConn = nil
+    end
+    if state.descendantConn then
+        pcall(function() state.descendantConn:Disconnect() end)
+        state.descendantConn = nil
+    end
+
+    if self.config.RESTORE_ON_STOP and state.originalCanCollide then
+        for part, orig in pairs(state.originalCanCollide) do
+            if part and part.Parent then
+                pcall(function() part.CanCollide = orig end)
+            end
+        end
+    end
+
+    self.boundPlayers[player] = nil
+end
+
+function OtherPlayersNoCollide:_initialBindAll()
+    for _, player in ipairs(Players:GetPlayers()) do
+        self:_bindPlayer(player)
+    end
+end
+
+function OtherPlayersNoCollide:_onPlayerAdded(player)
+    self:_bindPlayer(player)
+end
+
+function OtherPlayersNoCollide:_onPlayerRemoving(player)
+    self:_unbindPlayer(player)
+end
+
+function OtherPlayersNoCollide:_heartbeat(dt)
+    self._acc = self._acc + dt
+    if self._acc < self.config.CHECK_INTERVAL then return end
+    self._acc = 0
+
+    -- 周期性修正，防止其他脚本把 CanCollide 改回去
+    for player, state in pairs(self.boundPlayers) do
+        if player and player.Character then
+            for _, obj in ipairs(player.Character:GetDescendants()) do
+                if obj:IsA("BasePart") and obj.CanCollide ~= false then
+                    if self.config.RESTORE_ON_STOP and state.originalCanCollide[obj] == nil then
+                        state.originalCanCollide[obj] = obj.CanCollide
+                    end
+                    pcall(function() obj.CanCollide = false end)
+                end
+            end
+        end
+    end
+end
+
+function OtherPlayersNoCollide:Start()
+    if self._conn then return end
+    self._acc = 0
+    self:_initialBindAll()
+    self._playerAddedConn = Players.PlayerAdded:Connect(function(p) self:_onPlayerAdded(p) end)
+    self._playerRemovingConn = Players.PlayerRemoving:Connect(function(p) self:_onPlayerRemoving(p) end)
+    self._conn = RunService.Heartbeat:Connect(function(dt) self:_heartbeat(dt) end)
+end
+
+function OtherPlayersNoCollide:Stop()
+    if self._conn then
+        pcall(function() self._conn:Disconnect() end)
+        self._conn = nil
+    end
+    if self._playerAddedConn then
+        pcall(function() self._playerAddedConn:Disconnect() end)
+        self._playerAddedConn = nil
+    end
+    if self._playerRemovingConn then
+        pcall(function() self._playerRemovingConn:Disconnect() end)
+        self._playerRemovingConn = nil
+    end
+
+    -- 清理并可选恢复
+    for player, _ in pairs(self.boundPlayers) do
+        self:_unbindPlayer(player)
+    end
+    self.boundPlayers = {}
+end
+
+function OtherPlayersNoCollide:ForceApplyToModel(model)
+    if not model then return end
+    for _, obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            pcall(function() obj.CanCollide = false end)
+        end
+    end
+end
+
+-- === 自动创建客户端实例并 Start ===
+local success, err = pcall(function()
+    local player = Players.LocalPlayer
+    if not player then return end
+    local instance = OtherPlayersNoCollide.new(player)
+
+    -- 支持通过 ReplicatedStorage 的 RemoteEvent 控制（事件名: OtherPlayersNoCollideEvent）
+    local evt = ReplicatedStorage:FindFirstChild("OtherPlayersNoCollideEvent")
+    if evt and evt:IsA("RemoteEvent") then
+        evt.OnClientEvent:Connect(function(cmd, payload)
+            if not instance then return end
+            if cmd == "Start" then
+                instance:Start()
+            elseif cmd == "Stop" then
+                instance:Stop()
+            elseif cmd == "SetConfig" and type(payload) == "table" then
+                instance:SetConfig(payload)
+            elseif cmd == "ForceApplyToModel" and payload then
+                instance:ForceApplyToModel(payload)
+            end
+        end)
+    end
+
+    -- 自动 Start
+    instance:Start()
+
+    -- 暴露实例以便其它脚本访问（可选）
+    if shared then
+        shared.OtherPlayersNoCollideInstance = instance
+    end
+end)
+if not success then
+    warn("OtherPlayersNoCollide init failed: "..tostring(err))
+end
+
+return OtherPlayersNoCollide

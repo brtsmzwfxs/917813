@@ -1,197 +1,80 @@
--- LocalNoCollide.module.lua
--- 仅对 LocalPlayer 生效：将本地玩家角色的 BasePart.CanCollide 设为 false，并在 Disable 时恢复原值
+-- nocollide.lua
+-- 远程模块：返回一个表，包含 start / stop 方法
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-
 local localPlayer = Players.LocalPlayer
 
-if not localPlayer then
-    return {
-        Init = function() end,
-        Enable = function() end,
-        Disable = function() end,
-        Toggle = function() end,
-        IsEnabled = function() return false end,
-        Cleanup = function() end,
-    }
-end
+local M = {}
 
-local M = {
-    enabled = false,
-    interval = 0.12, -- 周期性修正间隔（秒）
-    heartbeatConn = nil,
-    charConn = nil,
-    descendantConns = {}, -- [character] = RBXScriptConnection
-    original = {}, -- [part] = originalCanCollide (boolean)
-}
+local running = false
+local connections = {}
+local accumulator = 0
+local CHECK_INTERVAL = 0.12
 
-local function safeDisconnect(conn)
-    if conn and typeof(conn) == "RBXScriptConnection" then
-        pcall(function() conn:Disconnect() end)
-    end
-end
-
-local function recordOriginal(part)
-    if not part then return end
-    if M.original[part] == nil then
-        -- 记录当前值（可能为 true/false）
-        M.original[part] = part.CanCollide
-    end
-end
-
-local function setNoCollide(part)
-    if not part or not part:IsA("BasePart") then return end
-    pcall(function()
-        recordOriginal(part)
-        part.CanCollide = false
-    end)
-end
-
-local function restorePart(part)
-    local orig = M.original[part]
-    if orig ~= nil and part and part.Parent then
-        pcall(function()
-            part.CanCollide = orig
-        end)
-    end
-    M.original[part] = nil
-end
-
-local function applyNoCollideToModel(model)
+local function applyNoCollide(model)
     if not model then return end
     for _, obj in ipairs(model:GetDescendants()) do
         if obj:IsA("BasePart") then
-            setNoCollide(obj)
+            pcall(function() obj.CanCollide = false end)
         end
-    end
-end
-
-local function onDescendantAdded(model, desc)
-    if desc and desc:IsA("BasePart") then
-        setNoCollide(desc)
     end
 end
 
 local function bindModel(model)
-    if notCollideToModel(model)
-    -- 记录并连接 DescendantAdded（每个 model 只连接一次）
-    if not M.descendantConns[model] then
-        local conn = model.DescendantAdded:Connect(function(desc)
-            onDescendantAdded(model, desc)
-        end)
-        M.descendantConns[model] = conn
-    end
-end
-
-local function unbindModel(model)
     if not model then return end
-    if M.descendantConns[model] then
-        safeDisconnect(M.descendantConns[model])
-        M.descendantConns[model] = nil
-    end
+    applyNoCollide(model)
+    table.insert(connections, model.DescendantAdded:Connect(function(desc)
+        if desc and desc:IsA("BasePart") then
+            pcall(function() desc.CanCollide = false end)
+        end
+    end))
 end
 
-local function bindCharacterEvents(character)
-    if not character then return end
-    bindModel(character)
+local function bindPlayer(player)
+    if player == localPlayer then return end
+    table.insert(connections, player.CharacterAdded:Connect(function(char)
+        if char then task.defer(function() bindModel(char) end) end
+    end))
+    if player.Character then bindModel(player.Character) end
 end
 
-local function onCharacterAdded(char)
-    -- 延迟以确保模型完成
-    task.defer(function()
-        bindCharacterEvents(char)
-    end)
-end
+function M.start(interval)
+    if running then return end
+    running = true
+    CHECK_INTERVAL = interval or CHECK_INTERVAL
 
-function M.Init()
-    if M.charConn then return end
-    -- 监听本地玩家角色（用于重生时重新应用）
-    M.charConn = localPlayer.CharacterAdded:Connect(onCharacterAdded)
-    -- 若已存在角色则绑定
-    if localPlayer.Character then
-        bindCharacterEvents(localPlayer.Character)
-    end
-end
+    for _, player in ipairs(Players:GetPlayers()) do bindPlayer(player) end
+    table.insert(connections, Players.PlayerAdded:Connect(bindPlayer))
 
-local accumulator = 0
-local function heartbeat(dt)
-    accumulator = accumulator + dt
-    if accumulator < M.interval then return end
-    accumulator = 0
-    if not M.enabled then return end
-    -- 周期性确保本地角色的所有 BasePart 为不可碰撞
-    local char = localPlayer.Character
-    if char then
-        for _, obj in ipairs(char:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                if obj.CanCollide ~= false then
-                    pcall(function() setNoCollide(obj) end)
+    table.insert(connections, RunService.Heartbeat:Connect(function(dt)
+        accumulator = accumulator + dt
+        if accumulator < CHECK_INTERVAL then return end
+        accumulator = 0
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= localPlayer and player.Character then
+                for _, obj in ipairs(player.Character:GetDescendants()) do
+                    if obj:IsA("BasePart") and obj.CanCollide ~= false then
+                        pcall(function() obj.CanCollide = false end)
+                    end
                 end
             end
         end
-    end
+    end))
 end
 
-function M.Enable()
-    if M.enabled then return end
-    M.enabled = true
-    -- 确保 init 已运行
-    M.Init()
-    -- 立即对当前角色应用
-    if localPlayer.Character then
-        applyNoCollideToModel(localPlayer.Character)
+function M.stop()
+    if not running then return end
+    running = false
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
     end
-    -- 启动 Heartbeat 连接用于周期性修正
-    if not M.heartbeatConn then
-        M.heartbeatConn = RunService.Heartbeat:Connect(heartbeat)
-    end
+    connections = {}
+    accumulator = 0
 end
 
-function M.Disable()
-    if not M.enabled then return end
-    M.enabled = false
-    -- 断开 Heartbeat
-    if M.heartbeatConn then
-        safeDisconnect(M.heartbeatConn)
-        M.heartbeatConn = nil
-    end
-    -- 恢复所有记录的原始 CanCollide 值（只对仍存在的部件）
-    for part, _ in pairs(M.original) do
-        if part and part.Parent then
-            pcall(function() part.CanCollide = M.original[part] end)
-        end
-        M.original[part] = nil
-    end
+function M.isRunning()
+    return running
 end
-
-function M.Toggle(state)
-    if state == nil then
-        if M.enabled then M.Disable() else M.Enable() end
-    elseif state then
-        M.Enable()
-    else
-        M.Disable()
-    end
-end
-
-function M.IsEnabled()
-    return M.enabled
-end
-
-function M.Cleanup()
-    M.Disable()
-    if M.charConn then
-        safeDisconnect(M.charConn)
-        M.charConn = nil
-    end
-    for model, conn in pairs(M.descendantConns) do
-        safeDisconnect(conn)
-    end
-    M.descendantConns = {}
-    M.original = {}
-end
-
--- 自动 Init（不自动启用）
-pcall(function() M.Init() end)
 
 return M

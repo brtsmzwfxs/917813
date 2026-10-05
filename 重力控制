@@ -17,9 +17,9 @@ local M = {
     enabled = false,
     conns = {},
     charConn = nil,
+    gravityConn = nil,
     currentGravity = workspace.Gravity,
-    originalGravity = nil,
-    originalRecorded = false,
+    serverGravity = workspace.Gravity,
 }
 
 local function safeDisconnect(c)
@@ -45,18 +45,23 @@ local function onCharacterAdded()
     reapplyEnabledFeatures()
 end
 
+local function onGravityChanged()
+    if not M.enabled then
+        M.serverGravity = workspace.Gravity
+    end
+end
+
 function M.Init()
     if M.charConn then return end
 
-    -- 关键：初始化时就记录"最原始"的重力
-    if not M.originalRecorded then
-        M.originalGravity = workspace.Gravity
-        M.originalRecorded = true
-        M.currentGravity = M.originalGravity
-    end
+    M.serverGravity = workspace.Gravity
+    M.currentGravity = M.serverGravity
 
     M.charConn = player.CharacterAdded:Connect(onCharacterAdded)
     table.insert(M.conns, M.charConn)
+
+    M.gravityConn = workspace:GetPropertyChangedSignal("Gravity"):Connect(onGravityChanged)
+    table.insert(M.conns, M.gravityConn)
 end
 
 function M.Enable()
@@ -67,10 +72,7 @@ end
 
 function M.Disable()
     M.enabled = false
-    -- 无条件恢复原始重力（不依赖 enabled 状态）
-    if M.originalRecorded and M.originalGravity ~= nil then
-        pcall(function() workspace.Gravity = M.originalGravity end)
-    end
+    pcall(function() workspace.Gravity = M.serverGravity end)
 end
 
 function M.Toggle(state)
@@ -95,6 +97,10 @@ end
 
 function M.GetGravity()
     return M.currentGravity
+end
+
+function M.GetServerGravity()
+    return M.serverGravity
 end
 
 function M.IsEnabled()

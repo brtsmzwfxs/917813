@@ -1,0 +1,468 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+
+local M = {}
+
+local running = false
+local connections = {}
+local guis = {}
+local damageNumbers = {}
+
+local statsVisible = true
+local lastPosition = nil
+local currentSpeed = 0
+local lastHealth = 100
+local healthBarGui = nil
+local damageAccumulator = 0
+local healAccumulator = 0
+local lastDisplayTime = 0
+local statRefreshTimer = 0
+
+local frame, toggleButton, speedLabel, walkSpeedLabel, jumpLabel, gravityLabel, healthBar, healthText
+
+local function addConnection(conn)
+    if conn then table.insert(connections, conn) end
+end
+
+local function formatNumber(value)
+    local truncated = math.floor(value * 10) / 10
+    if truncated == math.floor(truncated) then
+        return tostring(math.floor(truncated))
+    else
+        return string.format("%.1f", truncated)
+    end
+end
+
+local function createTextLabel(parent, text, position)
+    local mainLabel = Instance.new("TextLabel")
+    mainLabel.Size = UDim2.new(1, 0, 0, 20)
+    mainLabel.Position = position
+    mainLabel.BackgroundTransparency = 1
+    mainLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mainLabel.Text = text
+    mainLabel.Font = Enum.Font.GothamBold
+    mainLabel.TextSize = 13
+    mainLabel.TextXAlignment = Enum.TextXAlignment.Left
+    mainLabel.TextStrokeTransparency = 0
+    mainLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    mainLabel.ZIndex = 2
+    mainLabel.Parent = parent
+    return mainLabel
+end
+
+local function createHealthBar(character)
+    if healthBarGui then
+        healthBarGui:Destroy()
+        healthBarGui = nil
+    end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil, nil end
+
+    healthBarGui = Instance.new("BillboardGui")
+    healthBarGui.Name = "HealthBar"
+    healthBarGui.Size = UDim2.new(3, 0, 0.4, 0)
+    healthBarGui.StudsOffset = Vector3.new(0, -2.5, 0)
+    healthBarGui.AlwaysOnTop = true
+    healthBarGui.Adornee = humanoidRootPart
+    healthBarGui.Enabled = statsVisible
+    healthBarGui.Parent = humanoidRootPart
+
+    local healthBarBackground = Instance.new("Frame")
+    healthBarBackground.Size = UDim2.new(1, 0, 1, 0)
+    healthBarBackground.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    healthBarBackground.BorderSizePixel = 0
+    healthBarBackground.Parent = healthBarGui
+
+    local backgroundCorner = Instance.new("UICorner")
+    backgroundCorner.CornerRadius = UDim.new(0.5, 0)
+    backgroundCorner.Parent = healthBarBackground
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, 0, 1, 0)
+    bar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    bar.BorderSizePixel = 0
+    bar.Parent = healthBarBackground
+
+    local healthBarCorner = Instance.new("UICorner")
+    healthBarCorner.CornerRadius = UDim.new(0.5, 0)
+    healthBarCorner.Parent = bar
+
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.Text = "100/100"
+    text.TextColor3 = Color3.fromRGB(255, 255, 255)
+    text.Font = Enum.Font.GothamBold
+    text.TextSize = 10
+    text.TextStrokeTransparency = 0
+    text.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    text.ZIndex = 3
+    text.Parent = healthBarGui
+
+    return bar, text
+end
+
+local function updateHealthBar(humanoid, bar, text)
+    if humanoid and bar and text then
+        local currentHealth = humanoid.Health
+        local maxHealth = humanoid.MaxHealth
+        local healthPercentage = currentHealth / maxHealth
+
+        bar.Size = UDim2.new(healthPercentage, 0, 1, 0)
+        text.Text = formatNumber(currentHealth) .. "/" .. formatNumber(maxHealth)
+
+        if healthPercentage > 0.5 then
+            bar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        elseif healthPercentage > 0.25 then
+            bar.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+        else
+            bar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        end
+    end
+end
+
+local function showDamageNumber(character, amount, isHeal)
+    if not statsVisible then return end
+
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+
+    local startOffset = Vector3.new(0, 3, 0)
+
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Size = UDim2.new(4, 0, 2, 0)
+    billboardGui.StudsOffset = startOffset
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Adornee = humanoidRootPart
+    billboardGui.Enabled = statsVisible
+    billboardGui.Parent = humanoidRootPart
+
+    local formattedAmount = formatNumber(math.abs(amount))
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = (isHeal and "+" or "-") .. formattedAmount
+    textLabel.TextColor3 = isHeal and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextSize = 18
+    textLabel.TextStrokeTransparency = 0
+    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    textLabel.Parent = billboardGui
+
+    table.insert(damageNumbers, {
+        gui = billboardGui,
+        startTime = tick(),
+        startPosition = startOffset,
+        velocity = Vector3.new((math.random() - 0.5) * 2, 3, 0),
+        gravity = 8,
+        bounceFactor = 0.7,
+        minBounceVelocity = 0.1,
+        hasBounced = false,
+        isHeal = isHeal
+    })
+
+    game:GetService("Debris"):AddItem(billboardGui, 3)
+end
+
+local function updateDamageNumbers(dt)
+    local currentTime = tick()
+    for i = #damageNumbers, 1, -1 do
+        local data = damageNumbers[i]
+        if data.gui and data.gui.Parent then
+            local elapsed = currentTime - data.startTime
+
+            if elapsed < 3 then
+                local newVelocityY = data.velocity.Y - data.gravity * dt
+                local newPosition = Vector3.new(
+                    data.startPosition.X + data.velocity.X * elapsed,
+                    data.gui.StudsOffset.Y + newVelocityY * dt,
+                    data.startPosition.Z
+                )
+
+                if newPosition.Y <= data.startPosition.Y and newVelocityY < 0 then
+                    if not data.hasBounced or math.abs(newVelocityY) > data.minBounceVelocity then
+                        newVelocityY = -newVelocityY * data.bounceFactor
+                        data.hasBounced = true
+
+                        if math.random() < 0.5 then
+                            data.velocity = Vector3.new(-data.velocity.X * 0.8, newVelocityY, 0)
+                        else
+                            data.velocity = Vector3.new(data.velocity.X * 0.8, newVelocityY, 0)
+                        end
+                    else
+                        newVelocityY = 0
+                        newPosition = Vector3.new(newPosition.X, data.startPosition.Y, newPosition.Z)
+                        data.velocity = Vector3.new(data.velocity.X, 0, 0)
+                    end
+                else
+                    data.velocity = Vector3.new(data.velocity.X, newVelocityY, 0)
+                end
+
+                data.gui.StudsOffset = newPosition
+
+                local transparency = elapsed / 3
+                if data.gui:FindFirstChildOfClass("TextLabel") then
+                    data.gui.TextLabel.TextTransparency = transparency
+                    data.gui.TextLabel.TextStrokeTransparency = transparency
+                end
+            else
+                data.gui:Destroy()
+                table.remove(damageNumbers, i)
+            end
+        else
+            table.remove(damageNumbers, i)
+        end
+    end
+end
+
+local function updateSpeed(dt)
+    if not statsVisible then return end
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = player.Character.HumanoidRootPart
+        local currentPosition = rootPart.Position
+        if lastPosition and dt > 0 then
+            local distance = (currentPosition - lastPosition).Magnitude
+            currentSpeed = distance / dt
+            speedLabel.Text = "移动速度: " .. formatNumber(currentSpeed)
+        end
+        lastPosition = currentPosition
+    else
+        speedLabel.Text = "移动速度: N/A"
+    end
+end
+
+local function updateCharacterStats()
+    if not statsVisible then return end
+    local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        walkSpeedLabel.Text = "行走速度: " .. formatNumber(humanoid.WalkSpeed)
+        if humanoid.UseJumpPower then
+            jumpLabel.Text = "跳跃力量: " .. formatNumber(humanoid.JumpPower)
+        else
+            jumpLabel.Text = "跳跃高度: " .. formatNumber(humanoid.JumpHeight)
+        end
+    else
+        walkSpeedLabel.Text = "行走速度: N/A"
+        jumpLabel.Text = "跳跃力量: N/A"
+    end
+end
+
+local function updateGravity()
+    if not statsVisible then return end
+    gravityLabel.Text = "重力: " .. formatNumber(workspace.Gravity)
+end
+
+local function setupHealthMonitoring(character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    local bar, text = createHealthBar(character)
+    healthBar, healthText = bar, text
+    lastHealth = humanoid.Health
+
+    addConnection(humanoid.HealthChanged:Connect(function(newHealth)
+        updateHealthBar(humanoid, healthBar, healthText)
+        local healthDiff = newHealth - lastHealth
+        if math.abs(healthDiff) > 0.01 then
+            if healthDiff > 0 then
+                healAccumulator = healAccumulator + healthDiff
+            else
+                damageAccumulator = damageAccumulator + math.abs(healthDiff)
+            end
+        end
+        lastHealth = newHealth
+    end))
+
+    updateHealthBar(humanoid, bar, text)
+end
+
+local function onCharacterAdded(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    updateCharacterStats()
+    setupHealthMonitoring(character)
+
+    damageAccumulator = 0
+    healAccumulator = 0
+
+    addConnection(humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(updateCharacterStats))
+    addConnection(humanoid:GetPropertyChangedSignal("JumpPower"):Connect(updateCharacterStats))
+    addConnection(humanoid:GetPropertyChangedSignal("JumpHeight"):Connect(updateCharacterStats))
+    addConnection(humanoid:GetPropertyChangedSignal("UseJumpPower"):Connect(updateCharacterStats))
+
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    if hrp then lastPosition = hrp.Position end
+end
+
+local function toggleStatsVisibility()
+    statsVisible = not statsVisible
+    frame.Visible = statsVisible
+
+    if statsVisible then
+        toggleButton.Text = "隐藏数值"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+    else
+        toggleButton.Text = "显示数值"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
+    end
+
+    if healthBarGui then
+        healthBarGui.Enabled = statsVisible
+    end
+
+    for _, data in ipairs(damageNumbers) do
+        if data.gui and data.gui.Parent then
+            data.gui.Enabled = statsVisible
+        end
+    end
+end
+
+function M.start()
+    if running then return end
+    running = true
+    statsVisible = true
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CharacterStatsGui"
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    table.insert(guis, screenGui)
+
+    frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 180, 0, 120)
+    frame.Position = UDim2.new(0, 10, 1, -130)
+    frame.BackgroundTransparency = 1
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local switchScreenGui = Instance.new("ScreenGui")
+    switchScreenGui.Name = "StatsSwitchGui"
+    switchScreenGui.Parent = CoreGui
+    switchScreenGui.ResetOnSpawn = false
+    switchScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    switchScreenGui.DisplayOrder = 10
+    table.insert(guis, switchScreenGui)
+
+    toggleButton = Instance.new("TextButton")
+    toggleButton.Size = UDim2.new(0, 100, 0, 40)
+    toggleButton.Position = UDim2.new(0.5, -450, 0.5, -190)
+    toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+    toggleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+    toggleButton.Text = "隐藏数值"
+    toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.TextSize = 16
+    toggleButton.TextStrokeTransparency = 0
+    toggleButton.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    toggleButton.BorderSizePixel = 0
+    toggleButton.ZIndex = 100
+    toggleButton.Visible = false
+    toggleButton.Parent = switchScreenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = toggleButton
+
+    addConnection(toggleButton.MouseButton1Click:Connect(toggleStatsVisibility))
+    addConnection(GuiService.MenuOpened:Connect(function() toggleButton.Visible = true end))
+    addConnection(GuiService.MenuClosed:Connect(function() toggleButton.Visible = false end))
+
+    speedLabel = createTextLabel(frame, "移动速度: 0", UDim2.new(0, 0, 0, 0))
+    walkSpeedLabel = createTextLabel(frame, "行走速度: 0", UDim2.new(0, 0, 0, 25))
+    jumpLabel = createTextLabel(frame, "跳跃力量: 0", UDim2.new(0, 0, 0, 50))
+    gravityLabel = createTextLabel(frame, "重力: " .. formatNumber(workspace.Gravity), UDim2.new(0, 0, 0, 75))
+
+    if player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            updateCharacterStats()
+            setupHealthMonitoring(player.Character)
+            addConnection(humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(updateCharacterStats))
+            addConnection(humanoid:GetPropertyChangedSignal("JumpPower"):Connect(updateCharacterStats))
+            addConnection(humanoid:GetPropertyChangedSignal("JumpHeight"):Connect(updateCharacterStats))
+            addConnection(humanoid:GetPropertyChangedSignal("UseJumpPower"):Connect(updateCharacterStats))
+        end
+        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then lastPosition = hrp.Position end
+    end
+
+    addConnection(player.CharacterAdded:Connect(onCharacterAdded))
+    addConnection(workspace:GetPropertyChangedSignal("Gravity"):Connect(updateGravity))
+
+    updateGravity()
+
+    lastDisplayTime = tick()
+    statRefreshTimer = 0
+
+    addConnection(RunService.Heartbeat:Connect(function(dt)
+        updateSpeed(dt)
+        updateDamageNumbers(dt)
+
+        local now = tick()
+        if now - lastDisplayTime >= 0.3 then
+            lastDisplayTime = now
+            if damageAccumulator > 0 and player.Character then
+                showDamageNumber(player.Character, damageAccumulator, false)
+                damageAccumulator = 0
+            end
+            if healAccumulator > 0 and player.Character then
+                showDamageNumber(player.Character, healAccumulator, true)
+                healAccumulator = 0
+            end
+        end
+
+        statRefreshTimer = statRefreshTimer + dt
+        if statRefreshTimer >= 1 then
+            statRefreshTimer = 0
+            updateCharacterStats()
+        end
+    end))
+end
+
+function M.stop()
+    if not running then return end
+    running = false
+
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    connections = {}
+
+    for _, g in ipairs(guis) do
+        pcall(function() g:Destroy() end)
+    end
+    guis = {}
+
+    for _, data in ipairs(damageNumbers) do
+        if data.gui then
+            pcall(function() data.gui:Destroy() end)
+        end
+    end
+    damageNumbers = {}
+
+    if healthBarGui then
+        pcall(function() healthBarGui:Destroy() end)
+        healthBarGui = nil
+    end
+
+    frame, toggleButton, speedLabel, walkSpeedLabel, jumpLabel, gravityLabel, healthBar, healthText = nil, nil, nil, nil, nil, nil, nil, nil
+    lastPosition = nil
+    currentSpeed = 0
+    lastHealth = 100
+    damageAccumulator = 0
+    healAccumulator = 0
+    statsVisible = true
+end
+
+function M.isRunning()
+    return running
+end
+
+return M

@@ -1,0 +1,263 @@
+local M = {}
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+
+local player = Players.LocalPlayer
+
+if not player then
+    return {
+        start = function() end,
+        stop = function() end,
+        isRunning = function() return false end,
+    }
+end
+
+local running = false
+local connections = {}
+local loopThread = nil
+
+local COOLDOWN = 1
+local SCAN_INTERVAL = 0.25
+local CHECK_LINE_OF_SIGHT = false
+local DEBUG = false
+
+local prompts = {}
+local lastTriggered = {}
+
+local triggerFunction
+do
+    if type(fireproximityprompt) == "function" then
+        triggerFunction = function(p) pcall(fireproximityprompt, p) end
+    else
+        local altNames = {"FireProximityPrompt", "fireProximityPrompt", "TriggerProximityPrompt", "TriggerPrompt"}
+        for _, name in ipairs(altNames) do
+            local fn = ProximityPromptService[name]
+            if type(fn) == "function" then
+                triggerFunction = function(p) pcall(fn, ProximityPromptService, p) end
+                break
+            end
+        end
+    end
+    if not triggerFunction then
+        triggerFunction = function(p)
+            pcall(function()
+                if typeof(p.InputHoldBegin) == "function" and typeof(p.InputHoldEnd) == "function" then
+                    p:InputHoldBegin()
+                    task.wait(p.HoldDuration or 0)
+                    p:InputHoldEnd()
+                elseif typeof(p.Trigger) == "function" then
+                    p:Trigger()
+                end
+            end)
+        end
+    end
+end
+
+local function debugLog(...)
+    if DEBUG then
+        print("[AutoPrompt]", ...)
+    end
+end
+
+local function computeMaxDistSq(prompt)
+    local d = prompt.MaxActivationDistance or 10
+    return d * d
+end
+
+local function findBasePart(prompt)
+    local parent = prompt.Parent
+    if not parent then return nil end
+    if parent:IsA("BasePart") then return parent end
+    if parent:IsA("Attachment") then
+        local attachParent = parent.Parent
+        if attachParent and attachParent:IsA("BasePart") then
+            return attachParent
+        end
+    end
+    local found = parent:FindFirstChildWhichIsA("BasePart", true)
+    if found then return found end
+    return nil
+end
+
+local function addPrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    if prompts[prompt] then return end
+    local base = findBasePart(prompt)
+    prompts[prompt] = {
+        prompt = prompt,
+        basePart = base,
+        maxDistSq = computeMaxDistSq(prompt),
+    }
+
+    local conn = prompt:GetPropertyChangedSignal("Parent"):Connect(function()
+        local info = prompts[prompt]
+        if not info then
+            conn:Disconnect()
+            return
+        end
+        info.basePart = findBasePart(prompt)
+    end)
+    table.insert(connections, conn)
+
+    local destroyConn = prompt.Destroying:Connect(function()
+        prompts[prompt] = nil
+        lastTriggered[prompt] = nil
+        pcall(function() conn:Disconnect() end)
+        pcall(function() destroyConn:Disconnect() end)
+    end)
+    table.insert(connections, destroyConn)
+end
+
+local function removePrompt(prompt)
+    prompts[prompt] = nil
+    lastTriggered[prompt] = nil
+end
+
+function M.start(options)
+    if running then return end
+    running = true
+
+    options = options or {}
+    COOLDOWN = options.cooldown or COOLDOWN
+    SCAN_INTERVAL = options.scanInterval or SCAN_INTERVAL
+    CHECK_LINE_OF_SIGHT = options.checkLineOfSight or CHECK_LINE_OF_SIGHT
+    DEBUG = options.debug or DEBUG
+
+    prompts = {}
+    lastTriggered = {}
+    connections = {}
+
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then
+            addPrompt(v)
+        end
+    end
+
+    table.insert(connections, Workspace.DescendantAdded:Connect(function(d)
+        if running and d:IsA("ProximityPrompt") then addPrompt(d) end
+    end))
+
+    table.insert(connections, Workspace.DescendantRemoving:Connect(function(d)
+        if running and d:IsA("ProximityPrompt") then removePrompt(d) end
+    end))
+
+    if not player.Character then
+        pcall(function() player.CharacterAdded:Wait() end)
+    end
+
+    loopThread = task.spawn(function()
+        while running do
+            local char = player and player.Character
+            local hrp = char and (char:FindFirstChild("HumanoidRootPart")
+                                  or char:FindFirstChild("UpperTorso")
+                                  or char:FindFirstChild("Torso"))
+            if hrp then
+                local myPos = hrp.Position
+                for promptInstance, info in pairs(prompts) do
+                    if not running then break end
+                    if not promptInstance or not promptInstance.Parent then
+                        prompts[promptInstance] = nil
+                        lastTriggered[promptInstance] = nil
+                    else
+                        if promptInstance.Enabled then
+                            local base = info.basePart
+                            if not base or not base.Parent then
+                                base = findBasePart(promptInstance)
+                                info.basePart = base
+                            end
+                            if not base then
+                                debugLog("跳过（无 BasePart）:", promptInstance:GetFullName())
+                            else
+                                local currentMaxSq = computeMaxDistSq(promptInstance)
+                                if currentMaxSq ~= info.maxDistSq then
+                                    info.maxDistSq = currentMaxSq
+                                end
+                                local dx = myPos.X - base.Position.X
+                                local dy = myPos.Y - base.Position.Y
+                                local dz = myPos.Z - base.Position.Z
+                                local distSq = dx*dx + dy*dy + dz*dz
+                                if distSq <= info.maxDistSq then
+                                    if CHECK_LINE_OF_SIGHT and promptInstance.RequiresLineOfSight then
+                                        local ok = true
+                                        local fromPos = (char.Head and char.Head.Position) or myPos + Vector3.new(0,1.5,0)
+                                        local toPos = base.Position
+                                        local ray = Workspace:Raycast(fromPos, toPos - fromPos, RaycastParams.new())
+                                        if ray and not ray.Instance:IsDescendantOf(base) then
+                                            ok = false
+                                        end
+                                        if not ok then
+                                            debugLog("跳过（无直视）:", promptInstance:GetFullName())
+                                        else
+                                            local last = lastTriggered[promptInstance]
+                                            if not last or (os.clock() - last) >= COOLDOWN then
+                                                lastTriggered[promptInstance] = os.clock()
+                                                if promptInstance.HoldDuration and promptInstance.HoldDuration > 0
+                                                    and typeof(promptInstance.InputHoldBegin) == "function"
+                                                    and typeof(promptInstance.InputHoldEnd) == "function" then
+                                                    debugLog("按住触发:", promptInstance:GetFullName())
+                                                    pcall(function()
+                                                        promptInstance:InputHoldBegin()
+                                                        task.wait(promptInstance.HoldDuration)
+                                                        promptInstance:InputHoldEnd()
+                                                    end)
+                                                else
+                                                    debugLog("直接触发:", promptInstance:GetFullName())
+                                                    triggerFunction(promptInstance)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        local last = lastTriggered[promptInstance]
+                                        if not last or (os.clock() - last) >= COOLDOWN then
+                                            lastTriggered[promptInstance] = os.clock()
+                                            if promptInstance.HoldDuration and promptInstance.HoldDuration > 0
+                                                and typeof(promptInstance.InputHoldBegin) == "function"
+                                                and typeof(promptInstance.InputHoldEnd) == "function" then
+                                                debugLog("按住触发:", promptInstance:GetFullName())
+                                                pcall(function()
+                                                    promptInstance:InputHoldBegin()
+                                                    task.wait(promptInstance.HoldDuration)
+                                                    promptInstance:InputHoldEnd()
+                                                end)
+                                            else
+                                                debugLog("直接触发:", promptInstance:GetFullName())
+                                                triggerFunction(promptInstance)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(SCAN_INTERVAL)
+        end
+    end)
+end
+
+function M.stop()
+    if not running then return end
+    running = false
+
+    if loopThread then
+        pcall(function() task.cancel(loopThread) end)
+        loopThread = nil
+    end
+
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    connections = {}
+
+    prompts = {}
+    lastTriggered = {}
+end
+
+function M.isRunning()
+    return running
+end
+
+return M

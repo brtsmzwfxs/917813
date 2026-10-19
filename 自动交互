@@ -18,7 +18,7 @@ local running = false
 local connections = {}
 local loopThread = nil
 
-local COOLDOWN = 1.5
+local COOLDOWN = 0.5
 local SCAN_INTERVAL = 0.25
 local CHECK_LINE_OF_SIGHT = false
 local DEBUG = false

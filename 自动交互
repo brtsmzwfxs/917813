@@ -18,10 +18,11 @@ local running = false
 local connections = {}
 local loopThread = nil
 
-local COOLDOWN = 1
+local COOLDOWN = 1.5
 local SCAN_INTERVAL = 0.25
 local CHECK_LINE_OF_SIGHT = false
 local DEBUG = false
+local MAX_DISTANCE_OVERRIDE = 50
 
 local prompts = {}
 local lastTriggered = {}
@@ -84,11 +85,18 @@ end
 local function addPrompt(prompt)
     if not prompt or not prompt:IsA("ProximityPrompt") then return end
     if prompts[prompt] then return end
+
+    local originalDistance = prompt.MaxActivationDistance
+    if MAX_DISTANCE_OVERRIDE and MAX_DISTANCE_OVERRIDE > originalDistance then
+        pcall(function() prompt.MaxActivationDistance = MAX_DISTANCE_OVERRIDE end)
+    end
+
     local base = findBasePart(prompt)
     prompts[prompt] = {
         prompt = prompt,
         basePart = base,
         maxDistSq = computeMaxDistSq(prompt),
+        originalDistance = originalDistance,
     }
 
     local conn = prompt:GetPropertyChangedSignal("Parent"):Connect(function()
@@ -111,6 +119,10 @@ local function addPrompt(prompt)
 end
 
 local function removePrompt(prompt)
+    local info = prompts[prompt]
+    if info and info.originalDistance and prompt and prompt.Parent then
+        pcall(function() prompt.MaxActivationDistance = info.originalDistance end)
+    end
     prompts[prompt] = nil
     lastTriggered[prompt] = nil
 end
@@ -124,6 +136,7 @@ function M.start(options)
     SCAN_INTERVAL = options.scanInterval or SCAN_INTERVAL
     CHECK_LINE_OF_SIGHT = options.checkLineOfSight or CHECK_LINE_OF_SIGHT
     DEBUG = options.debug or DEBUG
+    MAX_DISTANCE_OVERRIDE = options.maxDistance or MAX_DISTANCE_OVERRIDE
 
     prompts = {}
     lastTriggered = {}
@@ -251,6 +264,12 @@ function M.stop()
         pcall(function() c:Disconnect() end)
     end
     connections = {}
+
+    for prompt, info in pairs(prompts) do
+        if info.originalDistance and prompt and prompt.Parent then
+            pcall(function() prompt.MaxActivationDistance = info.originalDistance end)
+        end
+    end
 
     prompts = {}
     lastTriggered = {}

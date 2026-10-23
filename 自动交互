@@ -19,7 +19,7 @@ local connections = {}
 local loopThread = nil
 
 local COOLDOWN = 0.5
-local SCAN_INTERVAL = 0.25
+local SCAN_INTERVAL = 0.1
 local CHECK_LINE_OF_SIGHT = false
 local DEBUG = false
 local MAX_DISTANCE_OVERRIDE = 50

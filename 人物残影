@@ -1,0 +1,183 @@
+--[[
+    AfterimageModule.lua
+    Pure module. Usage:
+        local M = loadstring(game:HttpGet(url))()
+        M.start()
+    Or require() it as a ModuleScript and call M.start().
+]]
+
+local M = {}
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+local CONFIG = {
+    INTERVAL = 0.09,
+    LIFETIME = 0.42,
+    TRANSPARENCY_FACTOR = 0.5,
+    MIN_SPEED = 2,
+    GHOST_NAME = "CyberpunkAfterimage",
+    FILL_COLOR = Color3.fromRGB(0, 220, 255),
+    OUTLINE_COLOR = Color3.fromRGB(180, 70, 255),
+    FILL_TRANSPARENCY = 0.78,
+    OUTLINE_TRANSPARENCY = 0.25,
+}
+
+local conn = nil
+local charConn = nil
+local character, humanoid, root
+local elapsed = 0
+local running = false
+
+local function cleanup()
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj.Name == CONFIG.GHOST_NAME then
+            obj:Destroy()
+        end
+    end
+    if conn then pcall(function() conn:Disconnect() end) end
+    if charConn then pcall(function() charConn:Disconnect() end) end
+    conn = nil
+    charConn = nil
+    running = false
+end
+
+local function bindCharacter(char)
+    character = char
+    humanoid = char:WaitForChild("Humanoid", 10)
+    root = char:WaitForChild("HumanoidRootPart", 10)
+end
+
+local function createAfterimage()
+    if not character or not character.Parent then return end
+
+    local oldArchivable = character.Archivable
+    character.Archivable = true
+    local ok, ghost = pcall(function() return character:Clone() end)
+    character.Archivable = oldArchivable
+
+    if not ok or not ghost then return end
+    ghost.Name = CONFIG.GHOST_NAME
+
+    for _, object in ipairs(ghost:GetDescendants()) do
+        if object:IsA("Script") or object:IsA("LocalScript")
+            or object:IsA("Humanoid") or object:IsA("AnimationController") then
+            object:Destroy()
+        end
+    end
+
+    local fadeTargets = {}
+    for _, object in ipairs(ghost:GetDescendants()) do
+        if object:IsA("BasePart") then
+            object.Anchored = true
+            object.CanCollide = false
+            object.CanTouch = false
+            object.CanQuery = false
+            local t = object.Transparency
+            object.Transparency = t + (1 - t) * CONFIG.TRANSPARENCY_FACTOR
+            table.insert(fadeTargets, object)
+        elseif object:IsA("Decal") or object:IsA("Texture") then
+            local t = object.Transparency
+            object.Transparency = t + (1 - t) * CONFIG.TRANSPARENCY_FACTOR
+            table.insert(fadeTargets, object)
+        end
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AfterimageGlow"
+    highlight.Adornee = ghost
+    highlight.FillColor = CONFIG.FILL_COLOR
+    highlight.OutlineColor = CONFIG.OUTLINE_COLOR
+    highlight.FillTransparency = CONFIG.FILL_TRANSPARENCY
+    highlight.OutlineTransparency = CONFIG.OUTLINE_TRANSPARENCY
+    highlight.Parent = ghost
+
+    ghost.Parent = workspace
+
+    local fadeInfo = TweenInfo.new(CONFIG.LIFETIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    for _, object in ipairs(fadeTargets) do
+        TweenService:Create(object, fadeInfo, { Transparency = 1 }):Play()
+    end
+    TweenService:Create(highlight, fadeInfo, {
+        FillTransparency = 1,
+        OutlineTransparency = 1,
+    }):Play()
+
+    Debris:AddItem(ghost, CONFIG.LIFETIME + 0.1)
+end
+
+local function onHeartbeat(dt)
+    if not character or not character.Parent then return end
+    if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then return end
+    if not root or not root.Parent then return end
+
+    local v = root.AssemblyLinearVelocity
+    local horiz = Vector3.new(v.X, 0, v.Z).Magnitude
+
+    if horiz < CONFIG.MIN_SPEED then
+        elapsed = 0
+        return
+    end
+
+    elapsed += dt
+    if elapsed >= CONFIG.INTERVAL then
+        elapsed = 0
+        createAfterimage()
+    end
+end
+
+function M.start()
+    if running then
+        cleanup()
+    end
+    if not player then
+        return false, "no LocalPlayer"
+    end
+
+    if player.Character then
+        bindCharacter(player.Character)
+    else
+        local ok, newChar = pcall(function() return player.CharacterAdded:Wait() end)
+        if ok and newChar then bindCharacter(newChar) end
+    end
+
+    if not character or not humanoid or not root then
+        return false, "character not ready"
+    end
+
+    elapsed = 0
+    conn = RunService.Heartbeat:Connect(onHeartbeat)
+    charConn = player.CharacterAdded:Connect(function(newChar)
+        bindCharacter(newChar)
+        elapsed = 0
+    end)
+    running = true
+    return true
+end
+
+function M.stop()
+    cleanup()
+    return true
+end
+
+function M.isRunning()
+    return running
+end
+
+function M.getConfig()
+    return CONFIG
+end
+
+function M.setConfig(tbl)
+    if type(tbl) ~= "table" then return false end
+    for k, v in pairs(tbl) do
+        if CONFIG[k] ~= nil then CONFIG[k] = v end
+    end
+    return true
+end
+
+return M

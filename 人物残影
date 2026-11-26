@@ -3,6 +3,7 @@
     Pure module. Usage:
         local M = loadstring(game:HttpGet(url))()
         M.start()
+        M.stop()
     Or require() it as a ModuleScript and call M.start().
 ]]
 
@@ -27,50 +28,76 @@ local CONFIG = {
     OUTLINE_TRANSPARENCY = 0.25,
 }
 
-local conn = nil
-local charConn = nil
 local character, humanoid, root
 local elapsed = 0
 local running = false
+local heartbeatConn = nil
+local charAddedConn = nil
 
+-- ===== 清理 =====
 local function cleanup()
     for _, obj in ipairs(workspace:GetChildren()) do
         if obj.Name == CONFIG.GHOST_NAME then
             obj:Destroy()
         end
     end
-    if conn then pcall(function() conn:Disconnect() end) end
-    if charConn then pcall(function() charConn:Disconnect() end) end
-    conn = nil
-    charConn = nil
+
+    if heartbeatConn then
+        pcall(function() heartbeatConn:Disconnect() end)
+        heartbeatConn = nil
+    end
+    if charAddedConn then
+        pcall(function() charAddedConn:Disconnect() end)
+        charAddedConn = nil
+    end
+
+    elapsed = 0
     running = false
 end
 
+-- ===== 绑定角色 =====
 local function bindCharacter(char)
     character = char
     humanoid = char:WaitForChild("Humanoid", 10)
     root = char:WaitForChild("HumanoidRootPart", 10)
 end
 
+-- ===== 残影生成 =====
 local function createAfterimage()
     if not character or not character.Parent then return end
 
     local oldArchivable = character.Archivable
     character.Archivable = true
-    local ok, ghost = pcall(function() return character:Clone() end)
+    local success, ghost = pcall(function()
+        return character:Clone()
+    end)
     character.Archivable = oldArchivable
 
-    if not ok or not ghost then return end
+    if not success or not ghost then return end
+
     ghost.Name = CONFIG.GHOST_NAME
 
     for _, object in ipairs(ghost:GetDescendants()) do
-        if object:IsA("Script") or object:IsA("LocalScript")
-            or object:IsA("Humanoid") or object:IsA("AnimationController") then
+        if object:IsA("Script")
+            or object:IsA("LocalScript")
+            or object:IsA("Humanoid")
+            or object:IsA("AnimationController")
+            or object:IsA("ParticleEmitter")
+            or object:IsA("Trail")
+            or object:IsA("Beam")
+            or object:IsA("Fire")
+            or object:IsA("Smoke")
+            or object:IsA("Sparkles")
+            or object:IsA("PointLight")
+            or object:IsA("SpotLight")
+            or object:IsA("SurfaceLight")
+            or object:IsA("Sound") then
             object:Destroy()
         end
     end
 
     local fadeTargets = {}
+
     for _, object in ipairs(ghost:GetDescendants()) do
         if object:IsA("BasePart") then
             object.Anchored = true
@@ -110,6 +137,7 @@ local function createAfterimage()
     Debris:AddItem(ghost, CONFIG.LIFETIME + 0.1)
 end
 
+-- ===== 主循环 =====
 local function onHeartbeat(dt)
     if not character or not character.Parent then return end
     if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then return end
@@ -130,6 +158,7 @@ local function onHeartbeat(dt)
     end
 end
 
+-- ===== 公共 API =====
 function M.start()
     if running then
         cleanup()
@@ -150,8 +179,8 @@ function M.start()
     end
 
     elapsed = 0
-    conn = RunService.Heartbeat:Connect(onHeartbeat)
-    charConn = player.CharacterAdded:Connect(function(newChar)
+    heartbeatConn = RunService.Heartbeat:Connect(onHeartbeat)
+    charAddedConn = player.CharacterAdded:Connect(function(newChar)
         bindCharacter(newChar)
         elapsed = 0
     end)
